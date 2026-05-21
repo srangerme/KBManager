@@ -1,0 +1,12 @@
+{
+  "name": "kbm",
+  "displayName": "KBManager",
+  "version": "1.0.9",
+  "description": "File-based personal AI knowledge manager commands for Claude Code.",
+  "author": {
+    "name": "KBManager"
+  },
+  "license": "MIT",
+  "keywords": ["knowledge-management", "markdown", "claude-code"],
+  "commands": "./commands/"
+}

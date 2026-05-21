@@ -1,0 +1,243 @@
+"""Built-in LLM prompt selection, versioning, and assembly."""
+
+from __future__ import annotations
+
+import copy
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from kbmanager.errors import RepositoryError
+from kbmanager.repository import ObjectRepository
+
+SYSTEM_PROMPTS_DIR = Path(__file__).resolve().parents[2] / "system-prompts"
+
+PROMPT_BY_PURPOSE = {
+    "source_ingest": "source-ingest",
+    "source_ingest_prompt_rewrite": "source-ingest-prompt-rewrite",
+    "create_candidate": "candidate-create",
+    "note_title_summary": "note-title-summary",
+    "candidate_review_assist": "candidate-review-assist",
+    "knowledge_merge_assist": "knowledge-merge-assist",
+    "knowledgebase_create": "knowledgebase-create",
+}
+
+OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
+    "source_ingest_result": {
+        "type": "object",
+        "required": ["input_path", "summary", "cleaned_content"],
+        "properties": {
+            "input_path": "string",
+            "title": "string",
+            "summary": "non-empty string",
+            "cleaned_content": "non-empty string",
+            "tags": "list[string]",
+            "authors": "list[string]",
+            "published_at": "string|null",
+        },
+    },
+    "source_ingest_result_list": {
+        "type": "object",
+        "required": ["sources"],
+        "properties": {"sources": "list[source_ingest_result]"},
+    },
+    "source_ingest_prompt_rewrite": {
+        "type": "object",
+        "required": ["rewritten_prompt", "intent_summary", "constraints", "warnings"],
+        "properties": {
+            "rewritten_prompt": "non-empty string",
+            "intent_summary": "non-empty string",
+            "constraints": "list[string]",
+            "warnings": "list[string]",
+        },
+    },
+    "candidate_draft_list": {
+        "type": "object",
+        "required": ["candidates"],
+        "properties": {
+            "candidates": [
+                {
+                    "title": "non-empty string",
+                    "body": "non-empty string",
+                    "source_refs": "list[string]",
+                    "note_refs": "list[string]",
+                    "evidence": "list[{source_id|object_id|id, locator, quote|excerpt|snippet}]",
+                    "suggested_tags": "list[string]",
+                    "suggested_kb_ids": "list[string]",
+                    "relations": "list[object]",
+                }
+            ]
+        },
+    },
+    "note_title_summary": {
+        "type": "object",
+        "required": ["title"],
+        "properties": {"title": "non-empty string", "summary": "string|null"},
+    },
+    "candidate_review_assist": {
+        "type": "object",
+        "required": ["summary", "evidence_review", "suggested_kb_ids", "recommendations"],
+        "properties": {
+            "summary": "non-empty string",
+            "evidence_review": "list[object]",
+            "suggested_kb_ids": "list[string]",
+            "recommendations": "list[object|string]",
+        },
+    },
+    "knowledge_merge_assist": {
+        "type": "object",
+        "required": ["merged_body", "tags", "kb_ids", "relations", "evidence_review"],
+    },
+    "knowledgebase_create_draft": {
+        "type": "object",
+        "required": ["frontmatter", "body"],
+        "properties": {
+            "frontmatter": {
+                "title": "non-empty string",
+                "description": "non-empty string",
+                "acceptance_criteria": "non-empty string",
+                "tags": "list[string]",
+            },
+            "body": "markdown string",
+        },
+    },
+}
+
+
+@dataclass(frozen=True)
+class SystemPrompt:
+    name: str
+    version: str
+    text: str
+    metadata: dict[str, Any]
+
+
+def load_system_prompt(name: str) -> SystemPrompt:
+    if "/" in name or "\\" in name or name.startswith("."):
+        raise RepositoryError(f"invalid system prompt name: {name}")
+    path = SYSTEM_PROMPTS_DIR / f"{name}.md"
+    if not path.is_file():
+        raise RepositoryError(f"system prompt not found: {name}")
+
+    text = path.read_text(encoding="utf-8")
+    document = ObjectRepository.parse_markdown(text, source=str(path))
+    version = document.frontmatter.get("version")
+    if not isinstance(version, (int, str)) or str(version) == "":
+        raise RepositoryError(f"system prompt has no version: {name}")
+    return SystemPrompt(
+        name=name,
+        version=str(version),
+        text=document.body.lstrip(),
+        metadata=dict(document.frontmatter),
+    )
+
+
+def prompt_name_for_purpose(purpose: str) -> str:
+    try:
+        return PROMPT_BY_PURPOSE[purpose]
+    except KeyError as exc:
+        raise RepositoryError(f"unsupported LLM purpose: {purpose}") from exc
+
+
+def schema_for_output(output_schema: str) -> dict[str, Any]:
+    try:
+        return OUTPUT_SCHEMAS[output_schema]
+    except KeyError as exc:
+        raise RepositoryError(f"unsupported LLM output schema: {output_schema}") from exc
+
+
+def assemble_prompt(
+    *,
+    system_prompt: str,
+    user_input: str | dict[str, Any] | None = None,
+    object_context: dict[str, Any] | None = None,
+    output_schema: str | dict[str, Any],
+    constraints: list[str] | None = None,
+) -> dict[str, Any]:
+    prompt = load_system_prompt(system_prompt)
+    schema = schema_for_output(output_schema) if isinstance(output_schema, str) else output_schema
+    sections = [
+        {"role": "system", "name": "kbmanager_system_prompt", "content": prompt.text},
+        {
+            "role": "user",
+            "name": "current_user_input",
+            "content": user_input if user_input is not None else {},
+        },
+        {
+            "role": "context",
+            "name": "object_context",
+            "content": _redacted_context(object_context or {}),
+        },
+        {
+            "role": "schema",
+            "name": "output_schema",
+            "content": {"schema": schema, "constraints": constraints or []},
+        },
+    ]
+    return {
+        "system_prompt": prompt.name,
+        "prompt_version": prompt.version,
+        "sections": sections,
+    }
+
+
+def prompt_descriptor(
+    *,
+    purpose: str,
+    output_schema: str,
+    user_input: str | dict[str, Any] | None,
+    object_context: dict[str, Any] | None,
+    constraints: list[str] | None,
+) -> dict[str, Any]:
+    prompt_name = prompt_name_for_purpose(purpose)
+    assembled = assemble_prompt(
+        system_prompt=prompt_name,
+        user_input=user_input,
+        object_context=object_context,
+        output_schema=output_schema,
+        constraints=constraints,
+    )
+    return {
+        "system_prompt": prompt_name,
+        "prompt_version": assembled["prompt_version"],
+        "output_schema": output_schema,
+        "output_schema_definition": schema_for_output(output_schema),
+        "prompt": assembled,
+    }
+
+
+def _redacted_context(context: dict[str, Any]) -> dict[str, Any]:
+    safe = copy.deepcopy(context)
+    if not safe.get("include_object_body", False):
+        _remove_body_fields(safe)
+    safe.pop("include_object_body", None)
+    return safe
+
+
+def _remove_body_fields(value: Any) -> None:
+    if isinstance(value, dict):
+        for key in list(value):
+            if key in {"body", "object_body", "full_body", "content"}:
+                replacement = _body_summary(value[key])
+                value[f"{key}_summary"] = replacement
+                del value[key]
+            else:
+                _remove_body_fields(value[key])
+    elif isinstance(value, list):
+        for item in value:
+            _remove_body_fields(item)
+
+
+def _body_summary(value: Any) -> str:
+    if not isinstance(value, str):
+        return "<non-text body omitted>"
+    compact = " ".join(value.split())
+    if not compact:
+        return ""
+    return compact if len(compact) <= 240 else compact[:237] + "..."
+
+
+def schema_as_yaml(schema_name: str) -> str:
+    return yaml.safe_dump(schema_for_output(schema_name), sort_keys=False, allow_unicode=True)

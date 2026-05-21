@@ -1,0 +1,58 @@
+"""KBManager Python package."""
+
+from kbmanager.application import (
+    candidate_create,
+    candidate_defer,
+    candidate_get,
+    candidate_next_pending,
+    index_rebuild,
+    init_workspace,
+    knowledge_accept,
+    knowledge_deprecate,
+    knowledge_merge,
+    knowledge_reject,
+    knowledgebase_create,
+    note_add,
+    note_deprecate,
+    note_get,
+    source_add,
+    source_deprecate,
+)
+from kbmanager.contracts import ApiError, ApiResult, ApiStatus
+from kbmanager.interface import ApplicationApiClient, InterfaceResult, SlashCommandInterface
+from kbmanager.object_paths import ObjectPaths
+from kbmanager.prompts import assemble_prompt, load_system_prompt
+from kbmanager.repository import MarkdownDocument, ObjectMetadata, ObjectRepository
+from kbmanager.workspace import Workspace
+
+__all__ = [
+    "ApiError",
+    "ApiResult",
+    "ApiStatus",
+    "ApplicationApiClient",
+    "assemble_prompt",
+    "candidate_create",
+    "candidate_defer",
+    "candidate_get",
+    "candidate_next_pending",
+    "init_workspace",
+    "index_rebuild",
+    "knowledge_accept",
+    "knowledgebase_create",
+    "knowledge_deprecate",
+    "knowledge_merge",
+    "knowledge_reject",
+    "InterfaceResult",
+    "load_system_prompt",
+    "note_add",
+    "note_deprecate",
+    "note_get",
+    "MarkdownDocument",
+    "ObjectMetadata",
+    "ObjectPaths",
+    "ObjectRepository",
+    "source_add",
+    "source_deprecate",
+    "SlashCommandInterface",
+    "Workspace",
+]
