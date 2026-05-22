@@ -565,6 +565,30 @@ def test_candidate_create_rejects_relation_target_that_is_not_knowledge(
     assert _non_placeholder_names(tmp_path / "candidates/pending") == []
 
 
+def test_candidate_create_relation_target_error_explains_expected_shape(
+    tmp_path: Path,
+) -> None:
+    source_id = _create_source(tmp_path)
+    token = candidate_create(tmp_path, source_ids=[source_id]).to_dict()["resume"]["token"]
+    bad_result = _candidate_llm_result(source_id)
+    bad_result["candidates"][0]["relations"] = [{"type": "supports"}]
+
+    result = candidate_create(
+        tmp_path,
+        source_ids=[source_id],
+        resume_token=token,
+        llm_result=bad_result,
+    )
+
+    data = result.to_dict()
+    assert data["status"] == "failed"
+    message = data["errors"][0]["message"]
+    assert "relations must be [] when there are no relations" in message
+    assert "{'type': 'related_to', 'target': 'knowledge-YYYYMMDD-001'}" in message
+    assert "relation.target must be an existing knowledge ID" in message
+    assert _non_placeholder_names(tmp_path / "candidates/pending") == []
+
+
 def test_candidate_create_rejects_missing_suggested_knowledgebase(tmp_path: Path) -> None:
     source_id = _create_source(tmp_path)
     token = candidate_create(tmp_path, source_ids=[source_id]).to_dict()["resume"]["token"]

@@ -75,7 +75,35 @@ flowchart TD
   B --> C["(interface) 用 Claude Code 展示 knowledgebase index"]
 ```
 
-## 6. `/note add`
+## 6. `/lark server start`
+
+```mermaid
+flowchart TD
+  A["(user) 输入命令"] --> B["(interface) 调用 daemon start"]
+  B --> C["(daemon) 按 workspace 进程名停止旧 server"]
+  C --> D["(daemon) 用当前 plugin/cache detached 启动 server"]
+  D --> E["(interface) 展示 pid、进程名和日志路径"]
+```
+
+## 7. `/lark server status`
+
+```mermaid
+flowchart TD
+  A["(user) 输入命令"] --> B["(interface) 调用 daemon status"]
+  B --> C["(daemon) 按 workspace 进程名扫描进程"]
+  C --> D["(interface) 展示 running、pid、日志和 settings 路径"]
+```
+
+## 8. `/lark server stop`
+
+```mermaid
+flowchart TD
+  A["(user) 输入命令"] --> B["(interface) 调用 daemon stop"]
+  B --> C["(daemon) 按 workspace 进程名停止 server"]
+  C --> D["(interface) 展示停止的 pid 和日志路径"]
+```
+
+## 9. `/note add`
 
 ```mermaid
 flowchart TD
@@ -86,7 +114,7 @@ flowchart TD
   E --> F["(interface) 展示 note ID"]
 ```
 
-## 7. `/note deprecate <note-id>`
+## 10. `/note deprecate <note-id>`
 
 ```mermaid
 flowchart TD
@@ -97,7 +125,7 @@ flowchart TD
   E --> F["(interface) 展示结果"]
 ```
 
-## 8. `/note list`
+## 11. `/note list`
 
 ```mermaid
 flowchart TD
@@ -105,7 +133,7 @@ flowchart TD
   B --> C["(interface) 用 Claude Code 展示 note index"]
 ```
 
-## 9. `/note view <note-id>`
+## 12. `/note view <note-id>`
 
 ```mermaid
 flowchart TD
@@ -113,7 +141,7 @@ flowchart TD
   B --> C["(interface) 用 Claude Code 展示 note Markdown"]
 ```
 
-## 10. `/source add <path>`
+## 13. `/source add <path>`
 
 ```mermaid
 flowchart TD
@@ -125,7 +153,7 @@ flowchart TD
   F --> G["(interface) 展示 source 和 candidate ID"]
 ```
 
-## 11. `/source deprecate <source-id>`
+## 14. `/source deprecate <source-id>`
 
 ```mermaid
 flowchart TD

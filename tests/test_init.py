@@ -39,6 +39,12 @@ def test_init_creates_workspace_structure_and_indexes(
         path = tmp_path / file_path
         assert path.is_file()
         assert path.read_text(encoding="utf-8") == content
+    assert (tmp_path / ".lark/logs").is_dir()
+    assert (tmp_path / ".lark/settings.json.example").is_file()
+    assert not (tmp_path / ".lark/settings.json").exists()
+    assert not (tmp_path / ".lark/KBM.ignore").exists()
+    assert not (tmp_path / ".lark/logs/KBM.ignore").exists()
+    assert not (tmp_path / "run_lark_server.py").exists()
     assert not (tmp_path / "templates").exists()
     assert not (tmp_path / ".claude").exists()
 

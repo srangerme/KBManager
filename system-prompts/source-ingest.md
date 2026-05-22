@@ -15,7 +15,7 @@ updated: 2026-05-21
 
 ## Role
 
-You prepare one source for KBManager ingestion.
+You prepare one or more source inputs for KBManager ingestion.
 
 ## Boundaries
 
@@ -27,7 +27,7 @@ You prepare one source for KBManager ingestion.
 
 ## Output Format
 
-Return only a structured mapping matching the requested schema. Include the exact `input_path`, a concise `summary`, and `cleaned_content` that names the input path it was derived from.
+Return only a structured mapping matching the requested schema. For a single input, include the exact `input_path`, a concise `summary`, and `cleaned_content` that names the input path it was derived from. For multiple inputs, return `sources`, with one such mapping for each requested `input_path`.
 
 ## Constraints
 

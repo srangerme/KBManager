@@ -30,6 +30,25 @@ You draft pending KBManager candidate knowledge from approved upstream context.
 
 Return only a structured mapping with `candidates`. Every candidate must include a title, body, upstream references, and evidence items with an upstream object ID, locator, and quote, excerpt, or snippet.
 
+Candidate draft shape:
+
+```yaml
+candidates:
+  - title: non-empty string
+    body: non-empty string
+    source_refs: [source-YYYYMMDD-001]
+    note_refs: []
+    evidence:
+      - source_id: source-YYYYMMDD-001
+        locator: page/section/line
+        quote: exact supporting text
+    suggested_tags: []
+    suggested_kb_ids: []
+    relations: []
+```
+
+Use `relations: []` when there is no relation to an existing accepted knowledge object. If a relation exists, use `type` and `target`, where `target` is an existing accepted knowledge ID such as `knowledge-YYYYMMDD-001`; never leave `target` blank and never point it at a source, note, candidate, or newly drafted candidate.
+
 ## Constraints
 
 - Preserve every upstream source or note reference required by the API.

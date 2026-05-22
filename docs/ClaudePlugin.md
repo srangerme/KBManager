@@ -30,6 +30,9 @@ commands are invoked as:
 /kbm:init
 /kbm:knowledgebase-create
 /kbm:knowledgebase-list [knowledgebase-id]
+/kbm:lark-server-start
+/kbm:lark-server-status
+/kbm:lark-server-stop
 /kbm:note-add
 /kbm:note-deprecate <note-id> reason:<reason>
 /kbm:note-list
@@ -96,6 +99,28 @@ project and are not part of the plugin installation.
 6. If the API returns `needs_review`, Claude Code pauses and asks the user for an
    explicit decision before calling write APIs.
 
+## Feishu/Lark Server
+
+KBManager also provides plugin-managed commands for the user-side Feishu/Lark
+message server:
+
+```txt
+/kbm:lark-server-start
+/kbm:lark-server-status
+/kbm:lark-server-stop
+```
+
+The server runs as a detached process for the current `${CLAUDE_PROJECT_DIR}`.
+`start` stops any existing KBManager Lark server for the same workspace by
+process-name marker before launching a new process from the current plugin
+installation. This means after a plugin update and `/reload-plugins`, running
+`/kbm:lark-server-start` switches the server to the current plugin cache.
+
+User configuration remains in `.lark/settings.json`; runtime state is limited to
+`.lark/server.pid` and `.lark/logs/server.log`. The pid file is only auxiliary:
+`start`, `stop`, and `status` identify the real process by the workspace-specific
+process name.
+
 ## Permissions
 
 Claude Code may ask before running the helper command because slash commands use
@@ -143,6 +168,12 @@ For normal updates:
 /plugin marketplace update sranger-marketplace
 /plugin update kbm@sranger-marketplace
 /reload-plugins
+```
+
+If the Feishu/Lark server is running, restart it after reloading plugins:
+
+```txt
+/kbm:lark-server-start
 ```
 
 If Claude Code reports `Plugin "kbm" is not installed` while updating an old

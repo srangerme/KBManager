@@ -66,7 +66,10 @@ OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
                     "evidence": "list[{source_id|object_id|id, locator, quote|excerpt|snippet}]",
                     "suggested_tags": "list[string]",
                     "suggested_kb_ids": "list[string]",
-                    "relations": "list[object]",
+                    "relations": (
+                        "list[{type: non-empty string, target: existing accepted "
+                        "knowledge ID}] or [] when there are no relations"
+                    ),
                 }
             ]
         },

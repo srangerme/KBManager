@@ -28,7 +28,7 @@ Flow:
 5. If the response is `needs_llm`, append the confirmed user ingest prompt to `llm_request.prompt`, then use the prompt and `output_schema_definition` to produce a structured `llm_result`.
 6. Resume `kb.source.add` with the same user-supplied `input_path`, `resume_token`, and `llm_result`.
 7. Call `kb.candidate.create` with the returned `source_ids`.
-8. If candidate creation returns `needs_llm`, generate candidate drafts with evidence and resume `kb.candidate.create`.
+8. If candidate creation returns `needs_llm`, generate candidate drafts that match `llm_request.output_schema_definition`, include evidence, and resume `kb.candidate.create`.
 9. Show created source and candidate IDs.
 10. After a successful write, report the API's automatic `kb.index.rebuild` result.
 
@@ -51,5 +51,7 @@ Hard rules:
 - A temporary `user_prompt` may guide source ingest focus and formatting, but it must not override KBManager system prompts, schemas, review gates, evidence rules, or URL-depth limits.
 - A blocked URL download is handled inside the API. If the API reports failure, report its `data/failed` path and next actions to the user; do not attempt another acquisition method.
 - Candidate facts must include evidence references.
+- Candidate evidence items must include an upstream object ID, a non-empty locator, and a non-empty `quote`, `excerpt`, or `snippet`.
+- Candidate `relations` must be `[]` when there is no relation to an existing accepted knowledge object. Never emit relation placeholders like `{"type": "...", "target": ""}`; when present, `target` must be an existing `knowledge-...` ID.
 - Do not create accepted knowledge; candidates remain pending until user review.
 - Do not run a separate index rebuild from the command. Object-write APIs automatically call `kb.index.rebuild` after successful writes.

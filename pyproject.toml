@@ -8,6 +8,7 @@ description = "File-based personal AI knowledge manager."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "lark-oapi>=1.5",
     "playwright>=1.40",
     "PyYAML>=5.4",
 ]

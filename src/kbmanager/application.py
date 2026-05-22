@@ -42,6 +42,7 @@ NOTE_DEPRECATE_OPERATION = "kb.note.deprecate"
 INDEX_REBUILD_OPERATION = "kb.index.rebuild"
 
 INIT_DIRECTORIES = (
+    ".lark/logs",
     "data/raw/md",
     "data/raw/pdf",
     "data/raw/html",
@@ -104,9 +105,22 @@ indexes:
     "indexes/review-queue.md": "# Review Queue\n\n",
 }
 INIT_DIRECTORY_PLACEHOLDER_FILES = {
-    f"{directory}/{INIT_DIRECTORY_PLACEHOLDER}": "" for directory in _all_init_directories()
+    f"{directory}/{INIT_DIRECTORY_PLACEHOLDER}": ""
+    for directory in _all_init_directories()
+    if not directory.startswith(".lark")
 }
-INIT_FILES = {**INIT_INDEX_FILES, **INIT_DIRECTORY_PLACEHOLDER_FILES}
+LARK_SETTINGS_EXAMPLE = """{
+  "app_id": "cli_xxxxxxxxxxxxxxxx",
+  "app_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "remote": "origin",
+  "branch": "main",
+  "ack_only": true
+}
+"""
+INIT_LARK_FILES = {
+    ".lark/settings.json.example": LARK_SETTINGS_EXAMPLE,
+}
+INIT_FILES = {**INIT_INDEX_FILES, **INIT_DIRECTORY_PLACEHOLDER_FILES, **INIT_LARK_FILES}
 
 
 def system_template_text(name: str) -> str:
@@ -180,6 +194,21 @@ INDEX_MARKDOWN_PATHS = (
     "indexes/review-queue.md",
 )
 INDEX_YAML_PATHS = ("indexes/relation-index.yml",)
+CANDIDATE_RELATION_SHAPE = (
+    "candidate relations must be [] when there are no relations, or mappings like "
+    "{'type': 'related_to', 'target': 'knowledge-YYYYMMDD-001'} where target is an "
+    "existing accepted knowledge ID"
+)
+REVIEW_RELATION_SHAPE = (
+    "reviewed relations must be [] when there are no relations, or mappings like "
+    "{'type': 'related_to', 'target': 'knowledge-YYYYMMDD-001'} where target is an "
+    "existing knowledge ID"
+)
+EVIDENCE_SHAPE = (
+    "evidence items must be mappings like {'source_id': '<requested-source-or-note-id>', "
+    "'locator': '<section/page/line>', 'quote': '<verbatim support>'}; object_id or id may "
+    "be used instead of source_id"
+)
 
 
 def init_workspace(root: str | Path = ".", *, dry_run: bool = False) -> ApiResult:
@@ -224,6 +253,8 @@ def init_workspace(root: str | Path = ".", *, dry_run: bool = False) -> ApiResul
         for relative_path in plan.create_files:
             path = workspace.resolve(relative_path)
             _write_new_text_atomic(path, INIT_FILES[relative_path])
+            if relative_path == "run_lark_server.py":
+                path.chmod(0o755)
             created_paths.append(path)
     except (OSError, KBManagerError) as exc:
         _rollback_created(created_paths)
@@ -1931,15 +1962,17 @@ def _validate_review_content(
     relations: list[dict[str, Any]] | None,
 ) -> None:
     if title is not None and not title.strip():
-        raise RepositoryError("reviewed title must be non-empty when provided")
+        raise RepositoryError("reviewed title must be non-empty when provided; expected string")
     if body is not None and not body.strip():
-        raise RepositoryError("reviewed body must be non-empty when provided")
+        raise RepositoryError("reviewed body must be non-empty when provided; expected string")
     if tags is not None and not _is_string_list(tags):
-        raise RepositoryError("reviewed tags must be a list of strings")
+        raise RepositoryError("reviewed tags must be a list of strings; use [] when no tags")
     if kb_ids is not None and not _is_string_list(kb_ids):
-        raise RepositoryError("reviewed kb_ids must be a list of strings")
+        raise RepositoryError(
+            "reviewed kb_ids must be a list of strings; use [] when no knowledge bases"
+        )
     if relations is not None and not _is_mapping_list(relations):
-        raise RepositoryError("reviewed relations must be a list of mappings")
+        raise RepositoryError(REVIEW_RELATION_SHAPE)
 
 
 def _validate_knowledge_review_refs(
@@ -1952,19 +1985,27 @@ def _validate_knowledge_review_refs(
     for kb_id in kb_ids:
         record = _find_single_object(repository, kb_id)
         if record.object_type != "knowledge-base":
-            raise RepositoryError(f"reviewed kb_id must reference knowledge-base: {kb_id}")
+            raise RepositoryError(
+                f"reviewed kb_id must reference knowledge-base: {kb_id}; "
+                "remove it or create/pass an existing kb-YYYYMMDD-001 ID"
+            )
     for relation in relations:
         relation_type = relation.get("type")
         target_id = relation.get("target")
         if not isinstance(relation_type, str) or not relation_type.strip():
-            raise RepositoryError("reviewed relation type must be a non-empty string")
+            raise RepositoryError(f"{REVIEW_RELATION_SHAPE}; relation.type must be non-empty")
         if not isinstance(target_id, str) or not target_id.strip():
-            raise RepositoryError("reviewed relation target must be a non-empty string")
+            raise RepositoryError(
+                f"{REVIEW_RELATION_SHAPE}; relation.target must be an existing knowledge ID"
+            )
         if target_id == self_knowledge_id:
             continue
         record = _find_single_object(repository, target_id)
         if record.object_type != "knowledge":
-            raise RepositoryError(f"reviewed relation target must be knowledge: {target_id}")
+            raise RepositoryError(
+                f"reviewed relation target must be knowledge: {target_id}; "
+                "remove non-knowledge targets or replace target with an existing knowledge ID"
+            )
 
 
 def _validate_existing_refs(
@@ -1973,7 +2014,7 @@ def _validate_existing_refs(
     field_name: str,
 ) -> None:
     if not _is_string_list(object_ids):
-        raise RepositoryError(f"{field_name} must be a list of strings")
+        raise RepositoryError(f"{field_name} must be a list of strings; use [] when empty")
     for object_id in object_ids:
         _find_single_object(repository, object_id)
 
@@ -1994,7 +2035,11 @@ def _validate_required_accept_content(
         relations=relations,
     )
     if title is None or body is None or tags is None or kb_ids is None or relations is None:
-        raise RepositoryError("accept requires reviewed title, body, tags, kb_ids, and relations")
+        raise RepositoryError(
+            "accept requires reviewed title, body, tags, kb_ids, and relations; "
+            "pass title/body as non-empty strings, tags/kb_ids as string lists, and "
+            "relations as [] or relation mappings"
+        )
 
 
 def _validate_required_merge_content(
@@ -2012,7 +2057,11 @@ def _validate_required_merge_content(
         relations=relations,
     )
     if body is None or tags is None or kb_ids is None or relations is None:
-        raise RepositoryError("merge requires reviewed body, tags, kb_ids, and relations")
+        raise RepositoryError(
+            "merge requires reviewed body, tags, kb_ids, and relations; "
+            "pass body as a non-empty string, tags/kb_ids as string lists, and "
+            "relations as [] or relation mappings"
+        )
 
 
 def _knowledge_body(reviewed_body: str | None, fallback_body: str) -> str:
@@ -2265,10 +2314,13 @@ def _validate_knowledgebase_input(
     if not isinstance(acceptance_criteria, str) or not acceptance_criteria.strip():
         raise RepositoryError("knowledge base acceptance criteria must be a non-empty string")
     if tags is not None and not _is_string_list(tags):
-        raise RepositoryError("knowledge base tags must be a list of strings")
+        raise RepositoryError("knowledge base tags must be a list of strings; use [] when empty")
     if knowledgebase_id is not None:
         if not ID_RE.match(knowledgebase_id) or not knowledgebase_id.startswith("kb-"):
-            raise RepositoryError(f"invalid knowledge base ID: {knowledgebase_id}")
+            raise RepositoryError(
+                f"invalid knowledge base ID: {knowledgebase_id}; expected kb-YYYYMMDD-001 "
+                "or kb-YYYYMMDD-001-title-slug"
+            )
         if knowledgebase_id in _id_paths(repository):
             raise RepositoryError(f"knowledge base ID already exists: {knowledgebase_id}")
     normalized_title = title.strip().casefold()
@@ -2302,29 +2354,38 @@ def _validate_note_input(
     if not isinstance(content, str) or not content.strip():
         raise RepositoryError("note content must be a non-empty string")
     if title is not None and not title.strip():
-        raise RepositoryError("note title must be non-empty when provided")
+        raise RepositoryError("note title must be non-empty when provided; omit it to derive one")
     if tags is not None and not _is_string_list(tags):
-        raise RepositoryError("note tags must be a list of strings")
+        raise RepositoryError("note tags must be a list of strings; use [] when empty")
     if note_id is not None:
         if not ID_RE.match(note_id) or not note_id.startswith("note-"):
-            raise RepositoryError(f"invalid note ID: {note_id}")
+            raise RepositoryError(
+                f"invalid note ID: {note_id}; expected note-YYYYMMDD-001 or "
+                "note-YYYYMMDD-001-title-slug"
+            )
         if note_id in _id_paths(repository):
             raise RepositoryError(f"note ID already exists: {note_id}")
     if bindings is not None and not _is_mapping_list(bindings):
-        raise RepositoryError("note bindings must be a list of mappings")
+        raise RepositoryError(
+            "note bindings must be a list of mappings like "
+            "{'type': 'source', 'id': 'source-YYYYMMDD-001'}; use [] when unbound"
+        )
     for binding in bindings or []:
         _validate_note_binding(repository, binding)
 
 
 def _validate_note_llm_result(result: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(result, dict):
-        raise RepositoryError("llm_result must be a mapping")
+        raise RepositoryError(
+            "llm_result must be a mapping like {'title': '<note title>', "
+            "'summary': '<optional summary>'}"
+        )
     title = result.get("title")
     if not isinstance(title, str) or not title.strip():
         raise RepositoryError("llm_result.title must be a non-empty string")
     summary = result.get("summary")
     if summary is not None and not isinstance(summary, str):
-        raise RepositoryError("llm_result.summary must be a string when provided")
+        raise RepositoryError("llm_result.summary must be a string when provided; omit if absent")
     return {
         "title": title.strip(),
         "summary": summary.strip() if isinstance(summary, str) else None,
@@ -2338,13 +2399,17 @@ def _validate_note_binding(
     binding_type = binding.get("type")
     object_id = binding.get("id")
     if binding_type not in NOTE_BINDING_TYPES:
-        raise RepositoryError(f"unsupported note binding type: {binding_type}")
+        raise RepositoryError(
+            f"unsupported note binding type: {binding_type}; expected one of "
+            f"{', '.join(sorted(NOTE_BINDING_TYPES))}"
+        )
     if not isinstance(object_id, str) or not object_id.strip():
         raise RepositoryError("note binding id must be a non-empty string")
     record = _find_single_object(repository, object_id)
     if record.object_type != binding_type:
         raise RepositoryError(
-            f"note binding {object_id} is {record.object_type}, expected {binding_type}"
+            f"note binding {object_id} is {record.object_type}, expected {binding_type}; "
+            "set binding.type to the actual object type or use a matching object ID"
         )
 
 
@@ -2835,9 +2900,9 @@ def _validate_source_add_input(
     if title is not None and (not isinstance(title, str) or not title.strip()):
         raise RepositoryError("source title must be a non-empty string when provided")
     if tags is not None and not _is_string_list(tags):
-        raise RepositoryError("source tags must be a list of strings")
+        raise RepositoryError("source tags must be a list of strings; use [] when empty")
     if authors is not None and not _is_string_list(authors):
-        raise RepositoryError("source authors must be a list of strings")
+        raise RepositoryError("source authors must be a list of strings; use [] when empty")
 
 
 def _validate_source_llm_results(
@@ -2848,19 +2913,28 @@ def _validate_source_llm_results(
         parsed = _validate_source_llm_result(result, source_inputs[0].relative_path)
         return [parsed]
     if not isinstance(result, dict):
-        raise RepositoryError("llm_result must be a mapping")
+        raise RepositoryError(
+            "llm_result must be a mapping with sources: [{'input_path': '<requested path>', "
+            "'summary': '<summary>', 'cleaned_content': '<content mentioning input_path>'}]"
+        )
     sources = result.get("sources")
     if not isinstance(sources, list) or len(sources) != len(source_inputs):
-        raise RepositoryError("llm_result.sources must match the requested source files")
+        raise RepositoryError(
+            "llm_result.sources must match the requested source files; provide exactly one "
+            "result per requested input_path"
+        )
 
     expected_paths = [source.relative_path for source in source_inputs]
     by_path: dict[str, dict[str, Any]] = {}
     for item in sources:
         if not isinstance(item, dict):
-            raise RepositoryError("each source ingest result must be a mapping")
+            raise RepositoryError(
+                "each source ingest result must be a mapping with input_path, summary, and "
+                "cleaned_content"
+            )
         input_ref = item.get("input_path")
         if not isinstance(input_ref, str):
-            raise RepositoryError("source ingest result must include input_path")
+            raise RepositoryError("source ingest result must include input_path as a string")
         if input_ref in by_path:
             raise RepositoryError(f"duplicate source ingest result for input_path: {input_ref}")
         by_path[input_ref] = _validate_source_llm_result(item, input_ref)
@@ -2868,7 +2942,10 @@ def _validate_source_llm_results(
     missing = sorted(set(expected_paths) - set(by_path))
     extra = sorted(set(by_path) - set(expected_paths))
     if missing or extra:
-        raise RepositoryError("source ingest results must exactly match requested input paths")
+        raise RepositoryError(
+            "source ingest results must exactly match requested input paths; missing="
+            f"{missing}, extra={extra}"
+        )
     return [by_path[path] for path in expected_paths]
 
 
@@ -2877,9 +2954,15 @@ def _validate_source_llm_result(
     expected_input_path: str,
 ) -> dict[str, Any]:
     if not isinstance(result, dict):
-        raise RepositoryError("llm_result must be a mapping")
+        raise RepositoryError(
+            "llm_result must be a mapping like {'input_path': '<requested path>', "
+            "'summary': '<summary>', 'cleaned_content': '<content mentioning input_path>'}"
+        )
     if result.get("input_path") != expected_input_path:
-        raise RepositoryError("llm_result.input_path must match the requested source input path")
+        raise RepositoryError(
+            "llm_result.input_path must match the requested source input path; expected "
+            f"{expected_input_path!r}"
+        )
     summary = result.get("summary")
     cleaned_content = result.get("cleaned_content")
     if not isinstance(summary, str) or not summary.strip():
@@ -2892,7 +2975,7 @@ def _validate_source_llm_result(
         )
     for key in ("authors", "tags"):
         if key in result and not _is_string_list(result[key]):
-            raise RepositoryError(f"llm_result.{key} must be a list of strings")
+            raise RepositoryError(f"llm_result.{key} must be a list of strings; use [] when empty")
     return result
 
 
@@ -3006,13 +3089,19 @@ def _validate_upstream_refs(
     note_ids: list[str],
 ) -> list[ObjectRecord]:
     if not source_ids and not note_ids:
-        raise RepositoryError("candidate must reference at least one source or note")
+        raise RepositoryError(
+            "candidate must reference at least one source or note; pass source_ids and/or "
+            "note_ids with existing object IDs"
+        )
 
     records: list[ObjectRecord] = []
     for source_id in source_ids:
         record = _find_single_object(repository, source_id, expected_type="source")
         if record.status not in {"raw", "archived", "deprecated"}:
-            raise RepositoryError(f"source has unsupported status: {source_id}")
+            raise RepositoryError(
+                f"source has unsupported status: {source_id}; candidate sources must be "
+                "raw, archived, or deprecated"
+            )
         records.append(record)
     for note_id in note_ids:
         records.append(_find_single_object(repository, note_id, expected_type="note"))
@@ -3094,30 +3183,42 @@ def _resource_for_meta_path(meta_path: Path) -> Path:
 
 def _validate_candidate_llm_result(result: dict[str, Any] | None) -> list[dict[str, Any]]:
     if not isinstance(result, dict):
-        raise RepositoryError("llm_result must be a mapping")
+        raise RepositoryError(
+            "llm_result must be a mapping like {'candidates': [candidate_draft, ...]}"
+        )
     drafts = result.get("candidates")
     if not isinstance(drafts, list) or not drafts:
-        raise RepositoryError("llm_result.candidates must be a non-empty list")
+        raise RepositoryError(
+            "llm_result.candidates must be a non-empty list of candidate drafts"
+        )
     for draft in drafts:
         if not isinstance(draft, dict):
-            raise RepositoryError("each candidate draft must be a mapping")
+            raise RepositoryError(
+                "each candidate draft must be a mapping with title, body, evidence, refs, "
+                "and optional relations"
+            )
         if not isinstance(draft.get("title"), str) or not draft["title"].strip():
             raise RepositoryError("candidate title must be a non-empty string")
         if not isinstance(draft.get("body"), str) or not draft["body"].strip():
             raise RepositoryError("candidate body must be a non-empty string")
         if draft.get("status") in {"accepted", "knowledge"} or draft.get("type") == "knowledge":
-            raise RepositoryError("LLM result must not create accepted knowledge")
+            raise RepositoryError(
+                "LLM result must not create accepted knowledge; create type candidate with "
+                "status omitted or pending"
+            )
         evidence = draft.get("evidence")
         if not isinstance(evidence, list) or not evidence:
-            raise RepositoryError("candidate evidence must be a non-empty list")
+            raise RepositoryError(f"candidate evidence must be a non-empty list; {EVIDENCE_SHAPE}")
         for key in ("source_refs", "note_refs", "suggested_tags", "suggested_kb_ids"):
             if key in draft and not _is_string_list(draft[key]):
-                raise RepositoryError(f"candidate {key} must be a list of strings")
+                raise RepositoryError(
+                    f"candidate {key} must be a list of strings; use [] when empty"
+                )
         if "relations" in draft and not _is_mapping_list(draft["relations"]):
-            raise RepositoryError("candidate relations must be a list of mappings")
+            raise RepositoryError(CANDIDATE_RELATION_SHAPE)
         for key in ("evidence_summary", "llm_notes"):
             if key in draft and not isinstance(draft[key], str):
-                raise RepositoryError(f"candidate {key} must be a string")
+                raise RepositoryError(f"candidate {key} must be a string; omit if absent")
     return drafts
 
 
@@ -3139,7 +3240,10 @@ def _plan_candidate_records(
             or not ID_RE.match(candidate_id)
             or not candidate_id.startswith("knowledge-")
         ):
-            raise RepositoryError(f"invalid candidate ID: {candidate_id}")
+            raise RepositoryError(
+                f"invalid candidate ID: {candidate_id}; expected knowledge-YYYYMMDD-001 "
+                "or omit id so the API can assign one"
+            )
         if candidate_id in used_ids or candidate_id in planned_ids:
             raise RepositoryError(f"candidate ID already exists: {candidate_id}")
         planned_ids.add(candidate_id)
@@ -3147,9 +3251,14 @@ def _plan_candidate_records(
         draft_source_ids = draft.get("source_refs", source_ids)
         draft_note_ids = draft.get("note_refs", note_ids)
         if not draft_source_ids and not draft_note_ids:
-            raise RepositoryError("candidate must reference at least one source or note")
+            raise RepositoryError(
+                "candidate must reference at least one source or note; source_refs/note_refs "
+                "must include the requested upstream IDs"
+            )
         if not _is_string_list(draft_source_ids) or not _is_string_list(draft_note_ids):
-            raise RepositoryError("candidate source_refs and note_refs must be string lists")
+            raise RepositoryError(
+                "candidate source_refs and note_refs must be string lists; use [] when empty"
+            )
         _validate_preserved_refs(source_ids, draft_source_ids, "source_refs")
         _validate_preserved_refs(note_ids, draft_note_ids, "note_refs")
         _validate_upstream_refs(repository, draft_source_ids, draft_note_ids)
@@ -3249,7 +3358,8 @@ def _validate_preserved_refs(
     missing = sorted(set(required_refs) - set(draft_refs))
     if missing:
         raise RepositoryError(
-            f"candidate {field_name} must preserve requested refs: {', '.join(missing)}"
+            f"candidate {field_name} must preserve requested refs: {', '.join(missing)}; "
+            "include every requested upstream ID in the draft"
         )
 
 
@@ -3262,15 +3372,23 @@ def _validate_evidence(
     upstream = set(source_ids) | set(note_ids)
     for item in evidence:
         if not isinstance(item, dict):
-            raise RepositoryError("evidence items must be mappings")
+            raise RepositoryError(EVIDENCE_SHAPE)
         source_id = item.get("source_id") or item.get("object_id") or item.get("id")
         locator = item.get("locator")
         if not isinstance(source_id, str) or source_id not in upstream:
-            raise RepositoryError(f"evidence references missing upstream object: {source_id}")
+            raise RepositoryError(
+                f"evidence references missing upstream object: {source_id}; evidence must "
+                f"reference one of requested upstream IDs: {sorted(upstream)}"
+            )
         if not isinstance(locator, str) or not locator.strip():
-            raise RepositoryError("evidence locator must be a non-empty string")
+            raise RepositoryError(
+                "evidence locator must be a non-empty string such as a page, section, "
+                "heading, or line range"
+            )
         if not _has_evidence_snippet(item):
-            raise RepositoryError("evidence must include a non-empty quote, excerpt, or snippet")
+            raise RepositoryError(
+                "evidence must include a non-empty quote, excerpt, or snippet field"
+            )
         _find_single_object(repository, source_id)
 
 
@@ -3282,12 +3400,18 @@ def _validate_candidate_relations(
         relation_type = relation.get("type")
         target_id = relation.get("target")
         if not isinstance(relation_type, str) or not relation_type.strip():
-            raise RepositoryError("candidate relation type must be a non-empty string")
+            raise RepositoryError(f"{CANDIDATE_RELATION_SHAPE}; relation.type must be non-empty")
         if not isinstance(target_id, str) or not target_id.strip():
-            raise RepositoryError("candidate relation target must be a non-empty string")
+            raise RepositoryError(
+                f"{CANDIDATE_RELATION_SHAPE}; "
+                "relation.target must be an existing knowledge ID"
+            )
         target = _find_single_object(repository, target_id)
         if target.object_type != "knowledge":
-            raise RepositoryError(f"candidate relation target must be knowledge: {target_id}")
+            raise RepositoryError(
+                f"candidate relation target must be knowledge: {target_id}; "
+                "remove non-knowledge targets or replace target with an existing knowledge ID"
+            )
 
 
 def _validate_candidate_suggested_kb_ids(
@@ -3297,7 +3421,10 @@ def _validate_candidate_suggested_kb_ids(
     for kb_id in suggested_kb_ids:
         record = _find_single_object(repository, kb_id)
         if record.object_type != "knowledge-base":
-            raise RepositoryError(f"candidate suggested_kb_id must be knowledge-base: {kb_id}")
+            raise RepositoryError(
+                f"candidate suggested_kb_id must be knowledge-base: {kb_id}; "
+                "remove it or use an existing kb-YYYYMMDD-001 ID"
+            )
 
 
 def _candidate_reference_summaries(

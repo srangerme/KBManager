@@ -50,7 +50,7 @@ Accept Claude Code flow:
    ```
 
 2. Ask the user to reply with `approve` to use the draft or with edited Markdown frontmatter and body.
-3. After the user has replied, parse frontmatter fields `title`, `tags`, `kb_ids`, `relations`, and the Markdown body.
+3. After the user has replied, parse frontmatter fields `title`, `tags`, `kb_ids`, `relations`, and the Markdown body. Empty `tags`, `kb_ids`, or `relations` must be passed as `[]`, not omitted.
 4. Call `kb.knowledge.accept` only with the parsed reviewed content plus `decision: "accept"` and `reviewed_by: "user"`.
 
 Merge Claude Code flow:
@@ -58,13 +58,14 @@ Merge Claude Code flow:
 1. Ask for a target knowledge ID before producing the merge draft.
 2. Display the proposed merged title, body, tags, suggested knowledgebase `kb_ids`, and `relations` in Claude Code.
 3. Ask the user to reply with `approve` to use the draft or with edited Markdown frontmatter and body.
-4. After the user has replied, parse frontmatter fields `title`, `tags`, `kb_ids`, `relations`, and the Markdown body.
+4. After the user has replied, parse frontmatter fields `title`, `tags`, `kb_ids`, `relations`, and the Markdown body. Empty `tags`, `kb_ids`, or `relations` must be passed as `[]`, not omitted.
 5. Call `kb.knowledge.merge` only with the parsed reviewed content, the target knowledge ID, `decision: "merge"`, and `reviewed_by: "user"`.
 
 Hard rules:
 
 - Never accept, reject, defer, or merge without explicit user decision.
 - For `accept` and `merge`, never call the write API until the user has replied in Claude Code with approval or reviewed content.
+- Reviewed `relations` must be `[]` when there are no relations. When present, each item must include non-empty `type` and `target`, and `target` must be an existing `knowledge-...` ID.
 - Never edit candidate or knowledge files directly.
 - Never use index content as a fact source.
 - After a successful status change, report the API's automatic `kb.index.rebuild` result. Do not run a separate rebuild from the command.

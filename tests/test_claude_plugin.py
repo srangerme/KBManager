@@ -17,6 +17,9 @@ DOCUMENTED_COMMANDS = [
     "init.md",
     "knowledgebase-create.md",
     "knowledgebase-list.md",
+    "lark-server-start.md",
+    "lark-server-status.md",
+    "lark-server-stop.md",
     "note-add.md",
     "note-deprecate.md",
     "note-list.md",
@@ -192,6 +195,14 @@ def test_command_api_operations_are_supported_by_plugin_helper() -> None:
     assert operation_refs <= supported
 
 
+def test_lark_server_commands_use_daemon_only() -> None:
+    for filename in ("lark-server-start.md", "lark-server-status.md", "lark-server-stop.md"):
+        text = (COMMAND_DIR / filename).read_text(encoding="utf-8")
+        assert "scripts/kbmanager_lark_server.py" in text
+        assert "kb.note.add" not in text
+        assert "kb.source.add" not in text
+
+
 def test_all_commands_document_required_and_optional_inputs() -> None:
     missing_required = []
     for filename, fields in COMMAND_REQUIRED_FIELDS.items():
@@ -295,7 +306,7 @@ def test_commands_with_user_review_writes_wait_for_claude_code_reply() -> None:
 
 
 def test_claude_plugin_package_does_not_contain_user_data_roots() -> None:
-    forbidden = {"data", "knowledge", "candidates", "notes", "indexes"}
+    forbidden = {".lark", "data", "knowledge", "candidates", "notes", "indexes"}
 
     for name in forbidden:
         assert not (REPO_ROOT / name).exists()
