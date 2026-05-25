@@ -121,6 +121,48 @@ User configuration remains in `.lark/settings.json`; runtime state is limited to
 `start`, `stop`, and `status` identify the real process by the workspace-specific
 process name.
 
+### Feishu/Lark Message Commands
+
+After the server is running, incoming Feishu/Lark messages are handled inside the
+user workspace:
+
+```txt
+help
+view <id>
+list kb
+list <kb-id>
+list note
+ask <question>
+note <content>
+<plain source text, URL, or one .md/.pdf file>
+```
+
+- `help` replies with the supported Feishu/Lark command syntax.
+- `view <id>` returns the object content for `note-*`, `knowledge-*`, `kb-*`,
+  or `source-*`. Markdown objects are returned as Markdown text. PDF/HTML source
+  objects return their metadata and the server also tries to send the original
+  source file.
+- `list kb` returns `indexes/kb-index.md`; `list <kb-id>` returns
+  `indexes/knowledgebase/<kb-id>-knowledge-index.md`; `list note` returns
+  `indexes/note-index.md`.
+- `ask <question>` runs `claude -p` in the current user workspace and replies
+  with plain text. The prompt instructs Claude Code to read workspace files only
+  as needed, avoid file writes or Git state changes, and return any required
+  clarification as text instead of opening UI confirmation.
+- Messages beginning with `note` add a note. Other non-command text is treated
+  as source input. A file-only message is treated as source input when the file
+  is a single `.md` or `.pdf`.
+
+All text replies are sent as Feishu/Lark rich-text `post` messages first, with
+plain-text fallback if rich-text delivery is rejected. Markdown headings, lists,
+links, inline styles, and code blocks are rendered through the rich-text path.
+Markdown tables are converted into readable indented bullet groups because Lark
+post messages do not provide a native table element.
+
+The `.lark/settings.json` `ack_only` flag is a debug switch. When it is `true`,
+the server acknowledges every Feishu/Lark message as successful and does not
+read objects, call Claude Code, run Git, or write KBManager data.
+
 ## Permissions
 
 Claude Code may ask before running the helper command because slash commands use

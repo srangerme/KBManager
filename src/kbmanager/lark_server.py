@@ -14,17 +14,21 @@ import tempfile
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 import yaml
 
 from kbmanager import application
 from kbmanager.contracts import ApiStatus
+from kbmanager.repository import ObjectRepository
+from kbmanager.workspace import Workspace
 
 SUPPORTED_FILE_SUFFIXES = {".md", ".pdf"}
 MAX_LLM_ATTEMPTS = 3
+LARK_TEXT_REPLY_LIMIT = 3500
 JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.IGNORECASE | re.DOTALL)
 LOGGER = logging.getLogger(__name__)
 
@@ -32,6 +36,12 @@ LOGGER = logging.getLogger(__name__)
 class ReplyClient(Protocol):
     def reply(self, message_id: str | None, chat_id: str | None, text: str) -> None:
         """Reply to the source message or chat."""
+
+    def reply_markdown(self, message_id: str | None, chat_id: str | None, markdown: str) -> None:
+        """Reply with Markdown rendered as Feishu/Lark rich text."""
+
+    def send_file(self, message_id: str | None, chat_id: str | None, path: Path) -> None:
+        """Send a local file to the source message or chat."""
 
 
 class FileDownloader(Protocol):
@@ -87,6 +97,8 @@ class JobResult:
     message: str
     commit_message: str | None = None
     object_ids: tuple[str, ...] = ()
+    files: tuple[Path, ...] = ()
+    markdown: bool = False
     stash_ref: str | None = None
 
 
@@ -102,7 +114,10 @@ class MessageAccumulator:
             return []
         kind = "source"
         content = text
-        if text.lower().startswith("note"):
+        command = _parse_lark_command(text)
+        if command is not None and not message.files:
+            kind, content = command
+        elif text.lower().startswith("note"):
             kind = "note"
             content = text[4:].strip()
         return [
@@ -220,6 +235,52 @@ class ClaudeCliLlm:
         return result
 
 
+class ClaudeTextCli:
+    def __init__(self, root: Path, *, timeout_seconds: int = 600) -> None:
+        self.root = root
+        self.timeout_seconds = timeout_seconds
+
+    def complete(self, question: str) -> str:
+        debug_log = _claude_debug_log_path(self.root, "lark_ask", uuid.uuid4().hex[:8])
+        prompt = _ask_prompt(question)
+        LOGGER.info("running claude ask debug_log=%s", debug_log)
+        started = time.monotonic()
+        try:
+            completed = subprocess.run(
+                [
+                    "claude",
+                    "-p",
+                    "--permission-mode",
+                    "bypassPermissions",
+                    "--debug-file",
+                    str(debug_log),
+                    "--add-dir",
+                    str(self.root),
+                ],
+                cwd=self.root,
+                check=False,
+                capture_output=True,
+                input=prompt,
+                text=True,
+                timeout=self.timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"claude -p ask timed out after {self.timeout_seconds}s; debug log: {debug_log}"
+            ) from exc
+        elapsed = time.monotonic() - started
+        LOGGER.info(
+            "claude ask exited returncode=%s elapsed=%.2fs debug_log=%s",
+            completed.returncode,
+            elapsed,
+            debug_log,
+        )
+        if completed.returncode != 0:
+            detail = completed.stderr.strip() or completed.stdout.strip()
+            raise RuntimeError(f"claude -p ask failed: {detail}; debug log: {debug_log}")
+        return completed.stdout.strip() or "(Claude Code returned an empty answer.)"
+
+
 class GitRunner:
     def __init__(self, root: Path, *, remote: str = "origin", branch: str = "main") -> None:
         self.root = root
@@ -279,12 +340,14 @@ class JobProcessor:
         root: Path,
         *,
         llm: ClaudeCliLlm | None = None,
+        ask_llm: ClaudeTextCli | None = None,
         git: GitRunner | None = None,
         downloader: FileDownloader | None = None,
         ack_only: bool = False,
     ) -> None:
         self.root = root
         self.llm = llm or ClaudeCliLlm(root)
+        self.ask_llm = ask_llm or ClaudeTextCli(root)
         self.git = git
         self.downloader = downloader
         self.ack_only = ack_only
@@ -308,6 +371,8 @@ class JobProcessor:
                 job.block.kind,
                 job.block.chat_id,
             )
+            if job.block.kind in {"help", "list", "view", "ask"}:
+                return self._process_command(job.block)
             if self.git is not None:
                 stash_ref = self.git.prepare(job.job_id)
             if job.block.kind == "note":
@@ -338,6 +403,33 @@ class JobProcessor:
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
             LOGGER.info("removed job temp dir job_id=%s path=%s", job.job_id, temp_dir)
+
+    def _process_command(self, block: MessageBlock) -> JobResult:
+        try:
+            if block.kind == "help":
+                return JobResult(success=True, message=_help_text())
+            if block.kind == "list":
+                return JobResult(
+                    success=True,
+                    message=_list_text(self.root, block.content),
+                    markdown=True,
+                )
+            if block.kind == "view":
+                text, files = _view_object(self.root, block.content)
+                return JobResult(success=True, message=text, files=files, markdown=True)
+            if block.kind == "ask":
+                question = block.content.strip()
+                if not question:
+                    raise ValueError("ask question is empty")
+                return JobResult(
+                    success=True,
+                    message=self.ask_llm.complete(question),
+                    markdown=True,
+                )
+        except Exception as exc:
+            LOGGER.exception("command failed kind=%s", block.kind)
+            return JobResult(success=False, message=str(exc))
+        return JobResult(success=False, message=f"unsupported command: {block.kind}")
 
     def _process_note(self, block: MessageBlock) -> JobResult:
         content = block.content.strip()
@@ -471,40 +563,317 @@ class Worker:
 
     def submit(self, block: MessageBlock) -> str:
         job_id = uuid.uuid4().hex[:12]
+        if block.kind in {"help", "list", "view"}:
+            LOGGER.info("processing sync command job_id=%s kind=%s", job_id, block.kind)
+            result = self.processor.process(Job(job_id=job_id, block=block))
+            self._reply_result(job_id, block, result, include_prefix=False)
+            return job_id
         self.jobs.put(Job(job_id=job_id, block=block))
         LOGGER.info("queued job job_id=%s kind=%s chat_id=%s", job_id, block.kind, block.chat_id)
-        self.replies.reply(
+        self.replies.reply_markdown(
             block.message_id,
             block.chat_id,
-            f"{block.kind} [{job_id}] 已收到，正在处理",
+            _queued_reply(block.kind, job_id),
         )
         return job_id
+
+    def _reply_result(
+        self,
+        job_id: str,
+        block: MessageBlock,
+        result: JobResult,
+        *,
+        include_prefix: bool,
+    ) -> None:
+        prefix = f"{block.kind} [{job_id}]"
+        if result.success:
+            if block.kind in {"note", "source"}:
+                ids = f"：{', '.join(result.object_ids)}" if result.object_ids else ""
+                stash = f"\n已保留 stash：{result.stash_ref}" if result.stash_ref else ""
+                text = f"{prefix} 已添加{ids}{stash}"
+            else:
+                text = f"{prefix}\n{result.message}" if include_prefix else result.message
+            self.replies.reply_markdown(block.message_id, block.chat_id, text)
+            for path in result.files:
+                try:
+                    self.replies.send_file(block.message_id, block.chat_id, path)
+                except Exception as exc:
+                    LOGGER.exception("failed to send result file path=%s", path)
+                    self.replies.reply_markdown(
+                        block.message_id,
+                        block.chat_id,
+                        f"文件发送失败：{path}\n{exc}",
+                    )
+        else:
+            stash = f"\n已保留 stash：{result.stash_ref}" if result.stash_ref else ""
+            text = f"{prefix} 失败：{result.message}{stash}" if include_prefix else result.message
+            self.replies.reply_markdown(block.message_id, block.chat_id, text)
 
     def _run(self) -> None:
         while True:
             job = self.jobs.get()
             try:
                 result = self.processor.process(job)
-                prefix = f"{job.block.kind} [{job.job_id}]"
-                if result.success:
-                    LOGGER.info("job succeeded job_id=%s kind=%s", job.job_id, job.block.kind)
-                    ids = f"：{', '.join(result.object_ids)}" if result.object_ids else ""
-                    stash = f"\n已保留 stash：{result.stash_ref}" if result.stash_ref else ""
-                    self.replies.reply(
-                        job.block.message_id,
-                        job.block.chat_id,
-                        f"{prefix} 已添加{ids}{stash}",
-                    )
-                else:
-                    LOGGER.info("job failed reply job_id=%s kind=%s", job.job_id, job.block.kind)
-                    stash = f"\n已保留 stash：{result.stash_ref}" if result.stash_ref else ""
-                    self.replies.reply(
-                        job.block.message_id,
-                        job.block.chat_id,
-                        f"{prefix} 添加失败：{result.message}{stash}",
-                    )
+                LOGGER.info(
+                    "job finished job_id=%s kind=%s success=%s",
+                    job.job_id,
+                    job.block.kind,
+                    result.success,
+                )
+                self._reply_result(job.job_id, job.block, result, include_prefix=True)
             finally:
                 self.jobs.task_done()
+
+
+def _parse_lark_command(text: str) -> tuple[str, str] | None:
+    stripped = text.strip()
+    folded = stripped.casefold()
+    if folded == "help":
+        return ("help", "")
+    for name in ("view", "list", "ask"):
+        prefix = f"{name} "
+        if folded.startswith(prefix):
+            return (name, stripped[len(prefix) :].strip())
+    return None
+
+
+def _queued_reply(kind: str, job_id: str) -> str:
+    if kind == "ask":
+        return f"ask [{job_id}] 已收到，正在生成回答"
+    return f"{kind} [{job_id}] 已收到，正在处理"
+
+
+def _help_text() -> str:
+    return """KBManager 飞书端命令：
+
+help
+  显示这份帮助。
+
+view <id>
+  查看对象内容。支持 note-*、knowledge-*、kb-*、source-*。
+  source 是 PDF/HTML 时会同时尝试发送源文件。
+
+list kb
+  列出 knowledge base。
+
+list <kb-id>
+  列出指定 knowledge base 下的 knowledge，例如 list kb-20260525-001。
+
+list note
+  列出 note。
+
+ask <question>
+  让 Claude Code 基于当前用户侧 git 工作区回答问题。
+
+其他文本默认按 source 导入；以 note 开头的文本按 note 添加。"""
+
+
+def _list_text(root: Path, target: str) -> str:
+    item = target.strip()
+    if not item:
+        raise ValueError("list requires a target: kb, <kb-id>, or note")
+    folded = item.casefold()
+    if folded == "kb":
+        return _read_workspace_text(root, "indexes/kb-index.md")
+    if folded == "note":
+        return _read_workspace_text(root, "indexes/note-index.md")
+    if item.startswith("kb-"):
+        return _read_workspace_text(root, f"indexes/knowledgebase/{item}-knowledge-index.md")
+    raise ValueError("list target must be kb, note, or a kb-* ID")
+
+
+def _view_object(root: Path, object_id: str) -> tuple[str, tuple[Path, ...]]:
+    item = object_id.strip()
+    if not item:
+        raise ValueError("view requires an object ID")
+    workspace = Workspace(root)
+    repository = ObjectRepository(workspace)
+    record = _find_record(repository, item)
+    if record.object_type not in {"note", "knowledge", "knowledge-base", "source"}:
+        raise ValueError(f"view does not support object type: {record.object_type}")
+    if record.path.suffix.lower() == ".md":
+        return record.path.read_text(encoding="utf-8"), ()
+    resource_path = _resource_for_meta_path(record.path)
+    metadata_text = yaml.safe_dump(record.metadata, sort_keys=False, allow_unicode=True).rstrip()
+    text = (
+        f"# {record.object_id}\n\n"
+        f"Source file: {workspace.relative(resource_path)}\n\n"
+        "```yaml\n"
+        f"{metadata_text}\n"
+        "```"
+    )
+    return text, (resource_path,)
+
+
+def _read_workspace_text(root: Path, relative_path: str) -> str:
+    workspace = Workspace(root)
+    path = workspace.resolve(relative_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"file not found: {relative_path}; run /kbm:check first")
+    return path.read_text(encoding="utf-8")
+
+
+def _find_record(repository: ObjectRepository, object_id: str) -> application.ObjectRecord:
+    matches = [record for record in _records(repository) if record.object_id == object_id]
+    if not matches:
+        raise ValueError(f"object not found: {object_id}")
+    if len(matches) > 1:
+        paths = ", ".join(str(path.path) for path in matches)
+        raise ValueError(f"duplicate object ID: {object_id}; {paths}")
+    return matches[0]
+
+
+def _records(repository: ObjectRepository) -> list[application.ObjectRecord]:
+    records: list[application.ObjectRecord] = []
+    for record in repository.iter_object_metadata():
+        records.append(
+            application.ObjectRecord(
+                object_id=record.object_id,
+                object_type=record.object_type,
+                status=str(record.metadata.get("status", "")),
+                path=record.path,
+                metadata=record.metadata,
+            )
+        )
+    return records
+
+
+def _resource_for_meta_path(meta_path: Path) -> Path:
+    if meta_path.parent.name in {"pdf", "html"}:
+        suffix = f".{meta_path.parent.name}"
+        return meta_path.with_name(meta_path.name.removesuffix(".meta.yml") + suffix)
+    return meta_path.with_name(meta_path.name.removesuffix(".meta.yml"))
+
+
+def _split_text_reply(text: str) -> list[str]:
+    if len(text) <= LARK_TEXT_REPLY_LIMIT:
+        return [text]
+    chunks: list[str] = []
+    remaining = text
+    while remaining:
+        chunk = remaining[:LARK_TEXT_REPLY_LIMIT]
+        break_at = max(chunk.rfind("\n"), chunk.rfind(" "))
+        if break_at > LARK_TEXT_REPLY_LIMIT // 2:
+            chunk = remaining[:break_at]
+        chunks.append(chunk)
+        remaining = remaining[len(chunk) :].lstrip()
+    return chunks
+
+
+def _split_markdown_reply(markdown: str) -> list[str]:
+    try:
+        from lark_oapi.channel.outbound import split_with_code_fences
+    except Exception:
+        return _split_text_reply(markdown)
+    return split_with_code_fences(markdown, limit=LARK_TEXT_REPLY_LIMIT) or [markdown]
+
+
+def _markdown_to_lark_post(markdown: str) -> dict[str, Any]:
+    markdown = _expand_markdown_tables(markdown)
+    try:
+        from lark_oapi.channel.outbound import markdown_to_post_ast
+    except Exception:
+        return {
+            "zh_cn": {
+                "title": _markdown_title(markdown),
+                "content": [[{"tag": "text", "text": markdown}]],
+            }
+        }
+    return markdown_to_post_ast(
+        markdown,
+        title=_markdown_title(markdown),
+        table_mode="off",
+        tag_md_mode="structured",
+    )
+
+
+def _expand_markdown_tables(markdown: str) -> str:
+    lines = markdown.splitlines()
+    output: list[str] = []
+    index = 0
+    while index < len(lines):
+        if _is_markdown_table_start(lines, index):
+            table_lines: list[str] = []
+            while index < len(lines) and _is_markdown_table_row(lines[index]):
+                table_lines.append(lines[index])
+                index += 1
+            output.extend(_table_to_indented_bullets(table_lines))
+            continue
+        output.append(lines[index])
+        index += 1
+    return "\n".join(output)
+
+
+def _is_markdown_table_start(lines: list[str], index: int) -> bool:
+    if index + 1 >= len(lines):
+        return False
+    return _is_markdown_table_row(lines[index]) and _is_markdown_table_separator(lines[index + 1])
+
+
+def _is_markdown_table_row(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2
+
+
+def _is_markdown_table_separator(line: str) -> bool:
+    stripped = line.strip().strip("|")
+    if not stripped:
+        return False
+    cells = [cell.strip() for cell in stripped.split("|")]
+    return all(re.fullmatch(r":?-{3,}:?", cell or "") for cell in cells)
+
+
+def _table_to_indented_bullets(lines: list[str]) -> list[str]:
+    rows = [_table_cells(line) for line in lines]
+    if len(rows) < 2:
+        return lines
+    headers = rows[0]
+    body_rows = rows[2:]
+    if not headers or not body_rows:
+        return lines
+    rendered: list[str] = []
+    for row_index, row in enumerate(body_rows, start=1):
+        primary = row[0] if row else ""
+        rendered.append(f"- {primary or f'Row {row_index}'}")
+        for column_index, header in enumerate(headers):
+            if column_index == 0:
+                continue
+            value = row[column_index] if column_index < len(row) else ""
+            rendered.append(f"  - {header}: {value}")
+        rendered.append("")
+    while rendered and rendered[-1] == "":
+        rendered.pop()
+    return rendered
+
+
+def _table_cells(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _markdown_title(markdown: str) -> str:
+    for line in markdown.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            title = stripped.lstrip("#").strip()
+            if title:
+                return title[:80]
+    return ""
+
+
+def _ask_prompt(question: str) -> str:
+    return f"""你是运行在用户侧 git 工作区中的 KBManager 飞书问答助手。
+
+回答用户问题时遵守以下规则：
+- 可以读取当前工作区中的文件来回答问题。
+- 不得创建、修改、删除、移动任何文件。
+- 不得运行会修改状态的命令。
+- 不得执行 git commit、git push 或其他提交/推送操作。
+- 如果需要用户确认、选择或澄清，不要触发任何 UI 确认；把需要确认的问题作为最终文本回复。
+- 返回普通文本；不要返回 JSON；不要用 Markdown fence 包裹整个答案。
+
+用户问题：
+{question}
+"""
 
 
 def load_settings(root: Path) -> LarkSettings:
@@ -584,6 +953,14 @@ class LarkReplyClient:
         self._client: Any | None = None
 
     def reply(self, message_id: str | None, chat_id: str | None, text: str) -> None:
+        self.reply_markdown(message_id, chat_id, text)
+
+    def reply_markdown(self, message_id: str | None, chat_id: str | None, markdown: str) -> None:
+        for chunk in _split_markdown_reply(markdown):
+            if not self._reply_markdown_chunk(message_id, chat_id, chunk):
+                self._reply_chunk(message_id, chat_id, chunk)
+
+    def _reply_chunk(self, message_id: str | None, chat_id: str | None, text: str) -> None:
         if self._client is None:
             LOGGER.warning("skip lark reply because client is not initialized chat_id=%s", chat_id)
             return
@@ -616,6 +993,139 @@ class LarkReplyClient:
                 )
         else:
             LOGGER.warning("skip lark reply because message_id is empty chat_id=%s", chat_id)
+
+    def _reply_markdown_chunk(
+        self,
+        message_id: str | None,
+        chat_id: str | None,
+        markdown: str,
+    ) -> bool:
+        if self._client is None:
+            LOGGER.warning(
+                "skip lark markdown reply because client is not initialized chat_id=%s",
+                chat_id,
+            )
+            return True
+        if not message_id:
+            LOGGER.warning(
+                "skip lark markdown reply because message_id is empty chat_id=%s",
+                chat_id,
+            )
+            return False
+        import lark_oapi as lark
+
+        post = _markdown_to_lark_post(markdown)
+        request = (
+            lark.BaseRequest.builder()
+            .http_method(lark.HttpMethod.POST)
+            .uri(f"/open-apis/im/v1/messages/{message_id}/reply")
+            .token_types({lark.AccessTokenType.TENANT})
+            .body(
+                {
+                    "msg_type": "post",
+                    "content": json.dumps(post, ensure_ascii=False),
+                }
+            )
+            .build()
+        )
+        response = self._client.request(request)
+        if response.success():
+            LOGGER.info("sent lark markdown reply message_id=%s chat_id=%s", message_id, chat_id)
+            return True
+        LOGGER.warning(
+            "failed to send lark markdown reply; fallback to text message_id=%s chat_id=%s msg=%s",
+            message_id,
+            chat_id,
+            getattr(response, "msg", ""),
+        )
+        return False
+
+    def send_file(self, message_id: str | None, chat_id: str | None, path: Path) -> None:
+        if self._client is None:
+            raise RuntimeError("cannot send file because lark client is not initialized")
+        import lark_oapi as lark
+
+        file_key = self._upload_file(lark, path)
+        if message_id and self._send_file_reply(lark, message_id, chat_id, file_key):
+            return
+        if not chat_id:
+            raise RuntimeError("cannot send file without chat_id")
+        request = (
+            lark.BaseRequest.builder()
+            .http_method(lark.HttpMethod.POST)
+            .uri("/open-apis/im/v1/messages")
+            .token_types({lark.AccessTokenType.TENANT})
+            .queries([("receive_id_type", "chat_id")])
+            .body(
+                {
+                    "receive_id": chat_id,
+                    "msg_type": "file",
+                    "content": json.dumps({"file_key": file_key}, ensure_ascii=False),
+                }
+            )
+            .build()
+        )
+        response = self._client.request(request)
+        if not response.success():
+            raise RuntimeError(f"failed to send file to chat: {response.msg}")
+
+    def _upload_file(self, lark: Any, path: Path) -> str:
+        from lark_oapi.api.im.v1 import CreateFileRequest, CreateFileRequestBody
+
+        with path.open("rb") as file:
+            request = (
+                CreateFileRequest.builder()
+                .request_body(
+                    CreateFileRequestBody.builder()
+                    .file_type("stream")
+                    .file_name(path.name)
+                    .file(file)
+                    .build()
+                )
+                .build()
+            )
+            response = self._client.im.v1.file.create(request)
+        if not response.success():
+            raise RuntimeError(f"failed to upload file {path}: {response.msg}")
+        data = getattr(response, "data", None)
+        file_key = _string(getattr(data, "file_key", "")) if data is not None else ""
+        if not file_key and isinstance(data, dict):
+            file_key = _string(data.get("file_key"))
+        if not file_key:
+            raise RuntimeError(f"file upload response had no file_key: {path}")
+        return file_key
+
+    def _send_file_reply(
+        self,
+        lark: Any,
+        message_id: str,
+        chat_id: str | None,
+        file_key: str,
+    ) -> bool:
+        request = (
+            lark.BaseRequest.builder()
+            .http_method(lark.HttpMethod.POST)
+            .uri(f"/open-apis/im/v1/messages/{message_id}/reply")
+            .token_types({lark.AccessTokenType.TENANT})
+            .body(
+                {
+                    "msg_type": "file",
+                    "content": json.dumps({"file_key": file_key}, ensure_ascii=False),
+                }
+            )
+            .build()
+        )
+        response = self._client.request(request)
+        if response.success():
+            LOGGER.info("sent lark file reply message_id=%s chat_id=%s", message_id, chat_id)
+            return True
+        LOGGER.warning(
+            "failed to send lark file reply; fallback to chat message_id=%s chat_id=%s msg=%s",
+            message_id,
+            chat_id,
+            getattr(response, "msg", ""),
+        )
+        return False
 
     def download_file(self, file: IncomingFile, temp_dir: Path) -> Path:
         if self._client is None or not file.file_key:
