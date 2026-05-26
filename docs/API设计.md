@@ -152,7 +152,7 @@ KBManager 本体不保存用户数据。用户侧不提供提示词文件，API 
 - `clean-migration-plan.md`
 - `candidate-review-assist.md`
 - `knowledge-merge-assist.md`
-- `knowledgebase-init.md`
+- `knowledgebase-create.md`
 
 Claude Code 的组装顺序：
 
@@ -364,7 +364,7 @@ candidates:
 - LLM 辅助：必需。API 返回 `needs_llm`，Claude Code 基于临时读取/采集的输入材料生成 `description`、`tags`、`scope` 和 `outline` 草案后 resume；API 校验 `llm_result` 后返回 `needs_review`，由 Interface 展示草案并收集用户确认或修改。
 - Review gate：必须在带 review 的 resume 请求中携带 user 的 approve 决策和 reviewed payload；写入内容必须来自用户在 Claude Code 确认后的 reviewed Markdown 或等价结构化输入。缺少 review 决策或 reviewed payload 时，API 返回 `needs_review`，不得写入。
 - 校验：目标 knowledgebase 必须存在且不是 `archived`；`description` 必须是非空字符串；`tags` 必须是字符串列表；`scope` 必须明确包含和排除范围；`outline` 可以是很大且复杂的节点树或节点列表，但每个可绑定节点必须有稳定 ID 或路径。
-- 输出：knowledgebase ID、路径、初始化字段摘要和自动索引重建结果。
+- 输出：knowledgebase ID、路径、create 阶段字段摘要和自动索引重建结果。
 - 约束：本 API 的 source-like input 只是初始化上下文，不成为 KBManager source，也不作为后续 candidate 的证据来源。
 
 ### `kb.knowledgebase.map`
@@ -435,7 +435,7 @@ candidates:
 - source deprecated。
 - candidate defer。
 - knowledge accept/merge/reject/deprecate。
-- knowledgebase init。
+- knowledgebase create initialization stage。
 - note deprecated。
 
 缺少 user review 时返回：

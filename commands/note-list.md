@@ -1,6 +1,5 @@
 ---
 description: Open or inspect the note index
-disable-model-invocation: true
 ---
 
 # KBManager Note List

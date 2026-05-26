@@ -1,6 +1,5 @@
 ---
 description: Open a Mermaid knowledgebase outline map in VSCode
-disable-model-invocation: true
 ---
 
 # KBManager Knowledgebase Map

@@ -52,7 +52,7 @@ candidates:
         suggested_change: non-empty string
 ```
 
-Use `bindto: []` when there is no suitable knowledgebase outline node. If the content belongs to a knowledgebase scope but no outline node covers it, do not invent an outline node; add an `outline_change_suggestions` item instead.
+Use `bindto: []` when there is a suitable knowledgebase outline node. If the content belongs to a knowledgebase scope but no outline node covers it, do not invent an outline node; add an `outline_change_suggestions` item instead.
 
 ## Constraints
 

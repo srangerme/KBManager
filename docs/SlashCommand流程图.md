@@ -17,8 +17,7 @@
 | `/check` | 修改 | 展示 `bindto`、outline 节点和 legacy 字段一致性问题。 |
 | `/clean` | 修改 | 特许迁移命令；完整计划经用户整批确认后才允许直接改对象文件，迁移计划需要覆盖 legacy `acceptance_criteria`、`kb_ids`、`child_of`。 |
 | `/init` | 不改主流程 | 初始化流程不受模型变化影响。 |
-| `/knowledgebase create [title]` | 修改 | 使用参数 title；为空时才询问用户 title，并创建最小 knowledgebase。 |
-| `/knowledgebase init <knowledgebase-id> <path-or-url>` | 支持 | 从 source-like input 初始化 knowledgebase 字段，但不创建 source。 |
+| `/knowledgebase create <path-or-url>` | 修改 | 创建最小 knowledgebase 后立即从 source-like input 生成 create 阶段字段，但不创建 source。 |
 | `/knowledgebase list` | 字段同步 | 只读流程不变，展示内容随索引包含 `scope/outline`。 |
 | `/knowledgebase map [knowledgebase-id]` | 修改 | 基于 `outline + bindto`，不再基于 knowledge 层级关系。 |
 | `/lark server start/status/stop` | 不改主流程 | server 生命周期不受知识模型变化影响。 |
@@ -90,33 +89,23 @@ flowchart TD
   D -- 否 --> F["(interface) 展示冲突原因，不创建文件"]
 ```
 
-## 5. `/knowledgebase create [title]`
+## 5. `/knowledgebase create <path-or-url>`
 
 ```mermaid
 flowchart TD
-  A["(user) 输入命令和可选 title"] --> B{"(interface) title 是否非空"}
-  B -- 是 --> C["(interface) 使用参数 title"]
-  B -- 否 --> D["(interface) 询问用户 title"]
-  C --> E["(api) kb.knowledgebase.create"]
-  D --> E
-  E --> F["(interface) 展示 knowledgebase ID、路径和初始化下一步"]
+  A["(user) 输入命令和 source-like input"] --> B["(interface) 原样保留 input；URL 不自行下载或导出"]
+  B --> C["(interface) 询问用户 title"]
+  C --> D["(api) kb.knowledgebase.create"]
+  D --> E["(api) kb.knowledgebase.init"]
+  E --> F["(interface) 接管 needs_llm 并生成 description、tags、scope、outline 草案"]
+  F --> G["(api) resume kb.knowledgebase.init 交回 llm_result 校验"]
+  G --> H["(interface) 展示 API 返回的 needs_review 草案"]
+  H --> I["(user) approve 或回复修改后的 Markdown/结构化字段"]
+  I --> J["(api) 带 review 和 reviewed payload 再次 resume kb.knowledgebase.init"]
+  J --> K["(interface) 展示 knowledgebase ID、create 阶段字段摘要和索引重建结果"]
 ```
 
-## 6. `/knowledgebase init <knowledgebase-id> <path-or-url>`
-
-```mermaid
-flowchart TD
-  A["(user) 输入 knowledgebase ID 和 source-like input"] --> B["(interface) 原样传递 input；URL 不自行下载或导出"]
-  B --> C["(api) kb.knowledgebase.init"]
-  C --> D["(interface) 接管 needs_llm 并生成 description、tags、scope、outline 草案"]
-  D --> E["(api) resume kb.knowledgebase.init 交回 llm_result 校验"]
-  E --> F["(interface) 展示 API 返回的 needs_review 草案"]
-  F --> G["(user) approve 或回复修改后的 Markdown/结构化字段"]
-  G --> H["(api) 带 review 和 reviewed payload 再次 resume kb.knowledgebase.init"]
-  H --> I["(interface) 展示初始化字段摘要和索引重建结果"]
-```
-
-## 7. `/knowledgebase list`
+## 6. `/knowledgebase list`
 
 ```mermaid
 flowchart TD
@@ -124,7 +113,7 @@ flowchart TD
   B --> C["(interface) 用 Claude Code 展示 knowledgebase index"]
 ```
 
-## 8. `/knowledgebase map [knowledgebase-id]`
+## 7. `/knowledgebase map [knowledgebase-id]`
 
 ```mermaid
 flowchart TD
@@ -135,7 +124,7 @@ flowchart TD
   D -- 否 --> F["(interface) 展示临时文件路径和 Markdown 内容"]
 ```
 
-## 9. `/lark server start`
+## 8. `/lark server start`
 
 ```mermaid
 flowchart TD
@@ -145,7 +134,7 @@ flowchart TD
   D --> E["(interface) 展示 pid、进程名和日志路径"]
 ```
 
-## 10. `/lark server status`
+## 9. `/lark server status`
 
 ```mermaid
 flowchart TD
@@ -154,7 +143,7 @@ flowchart TD
   C --> D["(interface) 展示 running、pid、日志和 settings 路径"]
 ```
 
-## 11. `/lark server stop`
+## 10. `/lark server stop`
 
 ```mermaid
 flowchart TD
@@ -163,7 +152,7 @@ flowchart TD
   C --> D["(interface) 展示停止的 pid 和日志路径"]
 ```
 
-## 12. `/note add`
+## 11. `/note add`
 
 ```mermaid
 flowchart TD
@@ -174,7 +163,7 @@ flowchart TD
   E --> F["(interface) 展示 note ID"]
 ```
 
-## 13. `/note deprecate <note-id>`
+## 12. `/note deprecate <note-id>`
 
 ```mermaid
 flowchart TD
@@ -185,7 +174,7 @@ flowchart TD
   E --> F["(interface) 展示结果"]
 ```
 
-## 14. `/note list`
+## 13. `/note list`
 
 ```mermaid
 flowchart TD
@@ -193,7 +182,7 @@ flowchart TD
   B --> C["(interface) 用 Claude Code 展示 note index"]
 ```
 
-## 15. `/note view <note-id>`
+## 14. `/note view <note-id>`
 
 ```mermaid
 flowchart TD
@@ -201,7 +190,7 @@ flowchart TD
   B --> C["(interface) 用 Claude Code 展示 note Markdown"]
 ```
 
-## 16. `/source add <path>`
+## 15. `/source add <path>`
 
 ```mermaid
 flowchart TD
@@ -213,7 +202,7 @@ flowchart TD
   F --> G["(interface) resume 后展示 source summary/tags、candidate ID、bindto 和 outline 修改建议"]
 ```
 
-## 17. `/source deprecate <source-id>`
+## 16. `/source deprecate <source-id>`
 
 ```mermaid
 flowchart TD

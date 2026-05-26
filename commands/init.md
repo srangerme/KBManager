@@ -1,6 +1,5 @@
 ---
 description: Initialize a KBManager workspace in the current Claude project directory
-disable-model-invocation: true
 ---
 
 # KBManager Init

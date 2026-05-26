@@ -1,6 +1,5 @@
 ---
 description: View a note by ID
-disable-model-invocation: true
 ---
 
 # KBManager Note View

@@ -29,8 +29,7 @@ commands are invoked as:
 /kbm:check
 /kbm:clean
 /kbm:init
-/kbm:knowledgebase-create [title]
-/kbm:knowledgebase-init <knowledgebase-id> <path-or-url>
+/kbm:knowledgebase-create <path-or-url>
 /kbm:knowledgebase-list [knowledgebase-id]
 /kbm:knowledgebase-map [knowledgebase-id]
 /kbm:lark-server-start
@@ -51,16 +50,15 @@ KBManager object files.
 
 KBManager uses "skill" only for user-triggerable conversational helpers. LLM
 steps embedded inside commands, such as source ingest, candidate creation,
-candidate review assistance, merge assistance, and knowledgebase initialization,
+candidate review assistance, merge assistance, and knowledgebase creation initialization,
 remain internal system prompts rather than user-facing skills. The planned
 `knowledgebase-deep-research-prompt` skill is user-triggerable: it reads a
 knowledgebase definition and produces a ChatGPT Deep Research prompt whose final
 report must list original reference URLs explicitly.
 
-`/kbm:knowledgebase-init <knowledgebase-id> <path-or-url>` initializes an
-existing knowledgebase shell through the `kb.knowledgebase.init` API. The input
-is temporary context only; it does not become a source object or a knowledgebase
-member.
+`/kbm:knowledgebase-create <path-or-url>` creates a knowledgebase shell, then
+initializes it through the `kb.knowledgebase.init` API. The input is temporary
+context only; it does not become a source object or a knowledgebase member.
 
 ## First Install
 

@@ -1,6 +1,5 @@
 ---
 description: Open or inspect the knowledgebase index
-disable-model-invocation: true
 ---
 
 # KBManager Knowledgebase List

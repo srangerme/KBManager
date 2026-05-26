@@ -41,8 +41,7 @@
 /source add <path>
 /source deprecate <source-id>
 /candidate review [candidate-id]
-/knowledgebase create [title]
-/knowledgebase init <knowledgebase-id> <path-or-url>
+/knowledgebase create <path-or-url>
 /knowledgebase list [knowledgebase-id]
 /knowledgebase map [knowledgebase-id]
 /note add
@@ -115,7 +114,7 @@ prompt 由以下部分组成：
 - `knowledge-merge-assist.md`：在 `/candidate review` 的 merge 分支中生成合并草案和 `bindto` 建议。
 - `note-title.md`：为 note 生成标题。
 - `clean-migration-plan.md`：为 `/clean` 根据工作区差异生成迁移计划。
-- `knowledgebase-init.md`：在 `/knowledgebase init` 中根据 source-like input 生成 knowledgebase 的 `description`、`tags`、`scope` 和 `outline` 草案。
+- `knowledgebase-create.md`：在 `/knowledgebase create <path-or-url>` 阶段根据 source-like input 生成 knowledgebase 的 `description`、`tags`、`scope` 和 `outline` 草案。
 
 内嵌在流程里的 LLM 能力不称为 skill；它们是 system prompt / internal prompt module，由 slash command 或 API `needs_llm` 固定触发。只有用户在 Claude Code 对话中可以直接触发的辅助能力才设计为 skill。
 
@@ -212,20 +211,13 @@ resume:
 - Knowledgebase 决策：candidate 创建时已经生成 `bindto` 建议；review 时 Interface 可补充只读建议，但最终只以用户在 Claude Code 中确认后的 `bindto` 为准。accept/merge 只写入 knowledge 的 `bindto`，knowledgebase 成员视图由索引派生；不会创建新的 knowledgebase、修改 knowledgebase 对象成员列表或提供独立成员维护流程。
 - 输出：candidate 新状态；如接受或合并，展示生成或更新的 knowledge。
 
-### `/knowledgebase create [title]`
+### `/knowledgebase create <path-or-url>`
 
-- 输入：可选 `title`。
-- 行为：如果命令参数中提供非空 `title`，Interface 直接使用该标题；如果为空，才询问用户 title。随后调用 API 创建最小 knowledgebase。
-- API 编排：解析或收集 title -> `kb.knowledgebase.create`。
-- 输出：knowledgebase ID、标题、路径，以及使用 `/knowledgebase init <knowledgebase-id> <path-or-url>` 初始化字段的下一步。
-
-### `/knowledgebase init <knowledgebase-id> <path-or-url>`
-
-- 输入：knowledgebase ID 和 source-like input；input 格式与 `/source add` 相同，可以是目录、文件路径或 URL。
-- 行为：用输入材料初始化 knowledgebase 的 `description`、`tags`、`scope` 和 `outline`。
-- API 编排：`kb.knowledgebase.init` -> 接管 `needs_llm` 并生成初始化草案 -> resume 交回 API 校验 -> API 返回 `needs_review` -> 在 Claude Code 展示草案 -> 用户确认或修改 -> 带 review 和 reviewed payload 再次 resume `kb.knowledgebase.init`。
+- 输入：source-like input；input 格式与 `/source add` 相同，可以是目录、文件路径或 URL。
+- 行为：先询问用户 title 并创建最小 knowledgebase，再用输入材料生成 create 阶段的 `description`、`tags`、`scope` 和 `outline`。
+- API 编排：解析或收集 input -> 询问 title -> `kb.knowledgebase.create` -> `kb.knowledgebase.init` -> 接管 `needs_llm` 并生成 create 阶段草案 -> resume 交回 API 校验 -> API 返回 `needs_review` -> 在 Claude Code 展示草案 -> 用户确认或修改 -> 带 review 和 reviewed payload 再次 resume `kb.knowledgebase.init`。
 - 约束：该输入不是 `source` 对象，不创建 `source-*`，不写入 `data/raw` 或 `data/cleaned`，不进入 source index，也不成为 knowledgebase 成员；它只作为本次初始化的临时上下文。URL 采集仍由 API 负责，Interface 不自行下载、打开浏览器、打印导出 PDF、抓取网页或保存 Markdown。
-- 输出：knowledgebase ID、初始化字段摘要、路径和自动索引重建结果。
+- 输出：knowledgebase ID、标题、create 阶段字段摘要、路径和自动索引重建结果。
 
 ### `/knowledgebase list [knowledgebase-id]`
 

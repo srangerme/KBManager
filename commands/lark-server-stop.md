@@ -1,6 +1,5 @@
 ---
 description: Stop the KBManager Feishu/Lark message server
-disable-model-invocation: true
 ---
 
 # KBManager Lark Server Stop

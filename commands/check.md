@@ -1,6 +1,5 @@
 ---
 description: Rebuild KBManager indexes and check consistency
-disable-model-invocation: true
 ---
 
 # KBManager Check

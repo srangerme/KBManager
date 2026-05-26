@@ -1,6 +1,5 @@
 ---
 description: Show the KBManager Feishu/Lark message server status
-disable-model-invocation: true
 ---
 
 # KBManager Lark Server Status
