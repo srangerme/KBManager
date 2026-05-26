@@ -8,7 +8,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MARKETPLACE_ROOT = Path("/home/sranger/codes/claude-code-marketplace")
 MARKETPLACE_NAME = "sranger-marketplace"
@@ -82,7 +81,9 @@ def register_plugin(marketplace_root: Path, repo_root: Path = REPO_ROOT) -> Path
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Register KBManager in a local Claude marketplace.")
+    parser = argparse.ArgumentParser(
+        description="Register KBManager in a local Claude marketplace."
+    )
     parser.add_argument(
         "--marketplace-root",
         type=Path,

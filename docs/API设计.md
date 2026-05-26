@@ -416,7 +416,7 @@ candidates:
 - 写入：目标范围内的派生索引文件；`dry_run` 时不写入，只返回拟更新 diff。
 - LLM 辅助：不需要。
 - Review gate：不需要，因为索引是派生视图，不是事实来源。
-- 输出：重建的索引路径、diff、发现的一致性问题和未修复项；一致性问题必须覆盖无效 `bindto`、不存在的 outline 节点、残留 legacy `child_of` 和 legacy `acceptance_criteria`。
+- 输出：重建的索引路径、diff、发现的一致性问题和未修复项；一致性问题必须覆盖无效 `bindto` 和不存在的 outline 节点。
 - 约束：不得把索引内容反向写回对象事实；对象文件和索引冲突时始终以对象文件为准。
 - 调用方式：对象写入 API 会在成功写入后自动调用非 dry-run `kb.index.rebuild`。`/check` 也直接调用非 dry-run `kb.index.rebuild`，用于重建派生索引并返回一致性问题。
 
@@ -425,7 +425,7 @@ candidates:
 - 输入：无。
 - 行为：只读扫描当前工作区目录设计和对象字段，对比当前版本预期。
 - LLM 辅助：存在差异时返回 `needs_llm`，Claude Code 根据差异生成迁移计划。
-- 输出差异：缺失目录、legacy 目录、legacy 字段、legacy 状态、路径迁移和冲突风险；字段差异必须识别 legacy `acceptance_criteria`、`kb_ids` 和 relation `child_of`。
+- 输出差异：缺失目录、字段 schema drift、状态 drift、路径迁移和冲突风险；只检查当前新设计预期，不承担旧设计迁移。
 - 约束：API 不执行迁移、不写对象文件；`/clean` 在展示完整迁移计划并获得用户整批确认后，才允许 Claude Code 直接修改文件。
 
 ## 11. Review Gate

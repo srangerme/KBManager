@@ -17,6 +17,7 @@ Required payload fields:
 - `source_id`
 - `reason`
 - `decision`: `"deprecate"`
+- `reviewed_by`
 
-Do not edit source metadata directly.
+Do not edit source metadata directly. This user review confirmation must identify `reviewed_by`.
 After success, report the API's automatic `kb.index.rebuild` result. Do not run a separate rebuild from the command.

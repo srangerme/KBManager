@@ -860,8 +860,7 @@ def _metadata_detail_lines(object_type: str, metadata: dict[str, Any]) -> list[s
     lines: list[str] = []
     fields = [
         ("tags", "Tags"),
-        ("kb_ids", "Knowledge Bases"),
-        ("source_refs", "Sources"),
+        ("bindto", "Knowledgebase Bindings"),
     ]
     for key, label in fields:
         value = _metadata_value_text(metadata.get(key))
@@ -1484,7 +1483,8 @@ def _llm_prompt_text(llm_request: dict[str, Any]) -> str:
         "or output schema.\n"
         "Return only valid JSON matching the requested output schema. Do not include "
         "Markdown fences, explanations, or extra text.\n\n"
-        f"Request metadata:\n{json.dumps(_llm_request_metadata(llm_request), ensure_ascii=False, indent=2)}\n\n"
+        "Request metadata:\n"
+        f"{json.dumps(_llm_request_metadata(llm_request), ensure_ascii=False, indent=2)}\n\n"
         + "\n\n".join(rendered_sections)
         + "\n"
     )

@@ -15,6 +15,7 @@ Optional payload fields:
 - `candidate_id`
 - `reason`
 - `merge_targets`
+- `reviewed_by`
 
 Helper invocation:
 
@@ -87,6 +88,7 @@ Merge Claude Code flow:
 Hard rules:
 
 - Never accept, reject, defer, or merge without explicit user decision.
+- Every status-changing branch is a user review and must pass `reviewed_by`.
 - For `accept` and `merge`, never call the write API until the user has replied in Claude Code with approval or reviewed content.
 - Reviewed `evidence` is part of the accept/merge payload and must remain traceable to the candidate's source evidence.
 - Reviewed `bindto` must be `[]` when there is no knowledgebase binding. When present, each item must include an existing `kb_id`, an existing `outline_node`, and a binding reason.

@@ -14,6 +14,7 @@ Optional payload fields:
 
 - `title`
 - `tags`
+- `authors`
 - `user_prompt`
 - `confirm_user_prompt`
 - `reviewed_user_prompt`

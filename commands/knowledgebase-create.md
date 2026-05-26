@@ -15,8 +15,8 @@ Claude Code flow:
 5. If `input_path` is a URL, do not try to download, open, print, export, scrape, or save the page yourself. Pass the original URL directly to the API.
 6. If the response is `needs_llm`, use the returned `llm_request.prompt` and `output_schema_definition` to produce a structured `llm_result` containing `description`, `tags`, `scope`, and `outline`.
 7. Resume `kb.knowledgebase.init` with the same `resume_token` and `llm_result`.
-8. When the API returns `needs_review`, display the draft in Claude Code and wait for the user to approve or provide edited structured fields.
-9. Resume `kb.knowledgebase.init` with the same `resume_token`, `review.decision: "approve"`, and the reviewed payload.
+8. When the API returns `needs_review`, display the draft in Claude Code and wait for the user to approve or provide edited structured fields. Treat this approval as the required user review confirmation.
+9. After the user has replied, parse the approved or edited fields into `review` and `reviewed_payload`, then resume `kb.knowledgebase.init` with the same `resume_token`, `review.decision: "approve"`, and the reviewed payload.
 10. Report the knowledgebase ID, initialized fields, path, and automatic `kb.index.rebuild` result.
 
 Helper invocation:
@@ -30,6 +30,12 @@ Required payload fields:
 
 - `title`
 - `input_path`
+- `review`
+- `reviewed_payload`
+
+Optional payload fields:
+
+- `knowledgebase_id`
 
 Hard rules:
 
@@ -37,7 +43,8 @@ Hard rules:
 - This command must not write to `data/raw/` or `data/cleaned/`.
 - The source-like input is temporary initialization context only and must not be added to source indexes or knowledgebase member views.
 - Do not modify knowledge files or knowledgebase member lists directly.
-- Do not call the final write resume until the user has approved or edited the reviewed payload in Claude Code.
+- Do not call `kb.knowledgebase.create` until the user has replied with the title.
+- Do not call the final write resume until the user has replied and approved or edited the reviewed payload in Claude Code.
 - URL acquisition is owned by the API. If the API reports failure, report its error and any `data/failed/` path; do not attempt another acquisition method.
 - Do not create or edit knowledgebase files directly.
 - After success, report the API's automatic `kb.index.rebuild` result. Do not run a separate rebuild from the command.

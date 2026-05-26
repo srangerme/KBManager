@@ -145,10 +145,13 @@ class SlashCommandInterface:
                         _claude_request(
                             "source_ingest_prompt",
                             "review_source_ingest_prompt",
-                            "Reply with approve to use the rewritten prompt, or provide revised prompt text.",
+                            "Reply with approve to use the rewritten prompt, "
+                            "or provide revised prompt text.",
                         )
                     ],
-                    next_actions=["Approve or revise the rewritten source ingest prompt in Claude Code."],
+                    next_actions=[
+                        "Approve or revise the rewritten source ingest prompt in Claude Code."
+                    ],
                     extra={"draft": draft},
                 )
             try:
@@ -363,10 +366,14 @@ class SlashCommandInterface:
                         _claude_request(
                             "reviewed_markdown",
                             "accept_candidate",
-                            "Reply with approve to use the draft, or provide reviewed Markdown frontmatter and body.",
+                            "Reply with approve to use the draft, or provide reviewed "
+                            "Markdown frontmatter and body.",
                         )
                     ],
-                    next_actions=["Review the accept draft in Claude Code and reply with approve or edited Markdown."],
+                    next_actions=[
+                        "Review the accept draft in Claude Code and reply with approve "
+                        "or edited Markdown."
+                    ],
                     extra={
                         "candidate": candidate_payload,
                         "review_assist": assist,
@@ -382,10 +389,10 @@ class SlashCommandInterface:
                 reviewed_by=self.reviewed_by,
                 reason=reason,
                 title=reviewed.get("title"),
-                body=reviewed.get("body"),
-                tags=reviewed.get("tags"),
-                kb_ids=reviewed.get("kb_ids"),
-                relations=reviewed.get("relations"),
+                summary=reviewed.get("summary"),
+                content=reviewed.get("content"),
+                evidence=reviewed.get("evidence"),
+                bindto=reviewed.get("bindto"),
             )
         elif decision == "merge":
             if not merge_targets:
@@ -442,20 +449,24 @@ class SlashCommandInterface:
                         _claude_request(
                             "reviewed_markdown",
                             "merge_candidate",
-                            "Reply with approve to use the merge draft, or provide reviewed Markdown frontmatter and body.",
+                            "Reply with approve to use the merge draft, or provide reviewed "
+                            "Markdown frontmatter and body.",
                         )
                     ],
-                    next_actions=["Review the merge draft in Claude Code and reply with approve or edited Markdown."],
+                    next_actions=[
+                        "Review the merge draft in Claude Code and reply with approve "
+                        "or edited Markdown."
+                    ],
                     extra={
                         "candidate": candidate_payload,
                         "review_assist": assist,
                         "merge_assist": merge_assist,
                         "review_draft": {
                             **review_draft,
-                            "body": merge_assist["merged_body"],
-                            "tags": merge_assist["tags"],
-                            "kb_ids": merge_assist["kb_ids"],
-                            "relations": merge_assist["relations"],
+                            "summary": merge_assist["merged_summary"],
+                            "content": merge_assist["merged_content"],
+                            "evidence": merge_assist["evidence"],
+                            "bindto": merge_assist["bindto"],
                         },
                     },
                 )
@@ -469,10 +480,10 @@ class SlashCommandInterface:
                 reviewed_by=self.reviewed_by,
                 reason=reason,
                 title=reviewed.get("title"),
-                body=reviewed.get("body"),
-                tags=reviewed.get("tags"),
-                kb_ids=reviewed.get("kb_ids"),
-                relations=reviewed.get("relations"),
+                summary=reviewed.get("summary"),
+                content=reviewed.get("content"),
+                evidence=reviewed.get("evidence"),
+                bindto=reviewed.get("bindto"),
             )
         else:
             return InterfaceResult(
@@ -500,58 +511,73 @@ class SlashCommandInterface:
         self,
         *,
         title: str,
-        description: str,
-        acceptance_criteria: str,
-        tags: list[str] | None = None,
+        input_path: str | Path,
+        knowledgebase_id: str | None = None,
+        init_llm_result: dict[str, Any] | None = None,
         reviewed_markdown: str | dict[str, Any] | None = None,
         approve: bool = False,
     ) -> InterfaceResult:
         calls: list[ApiCallRecord] = []
-        if not approve:
-            try:
-                draft = _knowledgebase_draft(
-                    title,
-                    description,
-                    acceptance_criteria,
-                    tags or [],
-                    self.llm,
-                )
-            except ValueError as exc:
-                return _invalid_llm_result(
-                    calls,
-                    [],
-                    "Knowledgebase create draft returned an invalid result.",
-                    "knowledgebase_create",
-                    str(exc),
-                )
+        created = self._call(
+            calls,
+            "kb.knowledgebase.create",
+            title=title,
+            knowledgebase_id=knowledgebase_id,
+        )
+        if created["status"] != ApiStatus.SUCCESS.value:
+            return self._from_api_result(created, calls, "Knowledgebase create failed.")
+        kb_id = created["knowledgebase_id"]
+        init_result = self._call(
+            calls,
+            "kb.knowledgebase.init",
+            knowledgebase_id=kb_id,
+            input_path=input_path,
+        )
+        if init_result["status"] != ApiStatus.NEEDS_LLM.value:
+            return self._from_api_result(
+                init_result,
+                calls,
+                "Knowledgebase init did not reach LLM boundary.",
+            )
+        init_llm_result = init_llm_result or self._complete_llm(
+            "knowledgebase_create",
+            init_result.get("llm_request"),
+            {"knowledgebase_id": kb_id, "input_path": str(input_path)},
+        )
+        reviewed = _knowledgebase_review_payload(reviewed_markdown, init_llm_result)
+        review = {"decision": "approve", "reviewed_by": self.reviewed_by} if approve else None
+        init_result = self._call(
+            calls,
+            "kb.knowledgebase.init",
+            knowledgebase_id=kb_id,
+            input_path=input_path,
+            resume_token=init_result["resume"]["token"],
+            llm_result=init_llm_result,
+            review=review,
+            reviewed_payload=reviewed if approve else None,
+        )
+        if init_result["status"] == ApiStatus.NEEDS_REVIEW.value:
             return InterfaceResult(
                 status=ApiStatus.NEEDS_REVIEW.value,
                 summary="Knowledgebase draft is waiting for user input in Claude Code.",
                 api_calls=calls,
                 requested_in_claude=[
-                    _claude_request(
-                        "reviewed_markdown",
-                        "create_knowledgebase",
-                        "Reply with approve to use the draft, or provide reviewed Markdown frontmatter and body.",
-                    )
+                        _claude_request(
+                            "reviewed_markdown",
+                            "init_knowledgebase",
+                            "Reply with approve to use the draft, or provide reviewed "
+                            "structured fields.",
+                        )
                 ],
                 next_actions=["Approve or revise the knowledgebase draft in Claude Code."],
-                extra={"draft": draft},
+                extra={"created": created, "draft": init_result.get("draft")},
             )
-
-        reviewed = _review_payload(reviewed_markdown, {"frontmatter": {}, "body": ""})
-        result = self._call(
+        return self._from_api_result(
+            init_result,
             calls,
-            "kb.knowledgebase.create",
-            title=reviewed.get("title") or title,
-            description=reviewed.get("description") or description,
-            acceptance_criteria=reviewed.get("acceptance_criteria") or acceptance_criteria,
-            tags=reviewed.get("tags", tags),
-            body=reviewed.get("body"),
-            decision="approve",
-            reviewed_by=self.reviewed_by,
+            "Created and initialized knowledgebase.",
+            extra={"created": created, "initialized": init_result},
         )
-        return self._from_api_result(result, calls, "Created knowledgebase.")
 
     def kb_knowledgebase_list(self, knowledgebase_id: str | None = None) -> InterfaceResult:
         path = (
@@ -814,10 +840,10 @@ def _review_payload(
     frontmatter = dict(candidate.get("frontmatter", {}))
     return {
         "title": frontmatter.get("title"),
-        "body": candidate.get("body"),
-        "tags": frontmatter.get("suggested_tags", frontmatter.get("tags", [])),
-        "kb_ids": frontmatter.get("suggested_kb_ids", frontmatter.get("kb_ids", [])),
-        "relations": frontmatter.get("relations", []),
+        "summary": frontmatter.get("summary"),
+        "content": candidate.get("body"),
+        "evidence": frontmatter.get("evidence", []),
+        "bindto": frontmatter.get("bindto", []),
     }
 
 
@@ -831,14 +857,18 @@ def _validate_llm_output(schema_name: str, result: Any) -> str | None:
             if field not in result:
                 return f"LLM result is missing required field: {field}"
     if schema_name == "knowledge_merge_assist":
-        if not isinstance(result.get("merged_body"), str) or not result["merged_body"].strip():
-            return "knowledge_merge_assist.merged_body must be a non-empty string"
-        if not _is_string_list(result.get("tags")):
-            return "knowledge_merge_assist.tags must be a list of strings"
-        if not _is_string_list(result.get("kb_ids")):
-            return "knowledge_merge_assist.kb_ids must be a list of strings"
-        if not _is_mapping_list(result.get("relations")):
-            return "knowledge_merge_assist.relations must be a list of mappings"
+        if not isinstance(result.get("merged_summary"), str) or not result[
+            "merged_summary"
+        ].strip():
+            return "knowledge_merge_assist.merged_summary must be a non-empty string"
+        if not isinstance(result.get("merged_content"), str) or not result[
+            "merged_content"
+        ].strip():
+            return "knowledge_merge_assist.merged_content must be a non-empty string"
+        if not _is_mapping_list(result.get("evidence")):
+            return "knowledge_merge_assist.evidence must be a list of mappings"
+        if not _is_mapping_list(result.get("bindto")):
+            return "knowledge_merge_assist.bindto must be a list of mappings"
         if not isinstance(result.get("evidence_review"), list):
             return "knowledge_merge_assist.evidence_review must be a list"
     if schema_name == "candidate_review_assist":
@@ -846,8 +876,8 @@ def _validate_llm_output(schema_name: str, result: Any) -> str | None:
             return "candidate_review_assist.summary must be a non-empty string"
         if not isinstance(result.get("evidence_review"), list):
             return "candidate_review_assist.evidence_review must be a list"
-        if not _is_string_list(result.get("suggested_kb_ids")):
-            return "candidate_review_assist.suggested_kb_ids must be a list of strings"
+        if not _is_mapping_list(result.get("bindto")):
+            return "candidate_review_assist.bindto must be a list of mappings"
         if not isinstance(result.get("recommendations"), list):
             return "candidate_review_assist.recommendations must be a list"
     if schema_name == "source_ingest_prompt_rewrite":
@@ -867,11 +897,15 @@ def _validate_llm_output(schema_name: str, result: Any) -> str | None:
         frontmatter = result.get("frontmatter")
         if not isinstance(frontmatter, dict):
             return "knowledgebase_create_draft.frontmatter must be a mapping"
-        for field in ("title", "description", "acceptance_criteria"):
+        for field in ("description",):
             if not isinstance(frontmatter.get(field), str) or not frontmatter[field].strip():
                 return f"knowledgebase_create_draft.frontmatter.{field} must be a non-empty string"
         if not _is_string_list(frontmatter.get("tags", [])):
             return "knowledgebase_create_draft.frontmatter.tags must be a list of strings"
+        if not isinstance(frontmatter.get("scope"), dict):
+            return "knowledgebase_create_draft.frontmatter.scope must be a mapping"
+        if not isinstance(frontmatter.get("outline"), list):
+            return "knowledgebase_create_draft.frontmatter.outline must be a list"
         if not isinstance(result.get("body"), str) or not result["body"].strip():
             return "knowledgebase_create_draft.body must be a non-empty string"
     return None
@@ -903,51 +937,19 @@ def _invalid_llm_result(
     )
 
 
-def _knowledgebase_draft(
-    title: str,
-    description: str,
-    acceptance_criteria: str,
-    tags: list[str],
-    llm: LlmClient | None,
+def _knowledgebase_review_payload(
+    reviewed_markdown: str | dict[str, Any] | None,
+    draft: dict[str, Any],
 ) -> dict[str, Any]:
-    if llm is not None:
-        result = llm.complete(
-            purpose="knowledgebase_create",
-            context={
-                "title": title,
-                "description": description,
-                "acceptance_criteria": acceptance_criteria,
-                "tags": tags,
-            },
-            prompt=assemble_prompt(
-                system_prompt="knowledgebase-create",
-                user_input={
-                    "title": title,
-                    "description": description,
-                    "acceptance_criteria": acceptance_criteria,
-                    "tags": tags,
-                },
-                object_context={},
-                output_schema="knowledgebase_create_draft",
-                constraints=["draft_only", "requires_user_approval"],
-            ),
-        )
-        error = _validate_llm_output("knowledgebase_create_draft", result)
-        if error is not None:
-            raise ValueError(error)
-        return result
-    return {
-        "frontmatter": {
-            "title": title,
-            "description": description,
-            "acceptance_criteria": acceptance_criteria,
-            "tags": tags,
-        },
-        "body": (
-            f"\n## Description\n\n{description}\n\n"
-            f"## Acceptance Criteria\n\n{acceptance_criteria}\n"
-        ),
-    }
+    if isinstance(reviewed_markdown, dict):
+        return dict(reviewed_markdown)
+    if isinstance(reviewed_markdown, str):
+        document = ObjectRepository.parse_markdown(reviewed_markdown, source="<review>")
+        payload = dict(document.frontmatter)
+        return payload
+    if isinstance(draft.get("frontmatter"), dict):
+        return dict(draft["frontmatter"])
+    return dict(draft)
 
 
 def _source_ingest_prompt_draft(
@@ -1050,6 +1052,7 @@ _APPLICATION_OPERATIONS = {
     "kb.knowledge.merge": application.knowledge_merge,
     "kb.knowledge.deprecate": application.knowledge_deprecate,
     "kb.knowledgebase.create": application.knowledgebase_create,
+    "kb.knowledgebase.init": application.knowledgebase_init,
     "kb.knowledgebase.map": application.knowledgebase_map,
     "kb.note.add": application.note_add,
     "kb.note.get": application.note_get,

@@ -28,7 +28,7 @@ def test_resolves_known_object_paths(tmp_path: Path) -> None:
     assert paths.note("note-1.md") == tmp_path / "notes/active/note-1.md"
     assert paths.note("note-1.md", status="deprecated") == tmp_path / "notes/deprecated/note-1.md"
     assert paths.index("source-index.md") == tmp_path / "indexes/source-index.md"
-    assert paths.index("relation-index.yml") == tmp_path / "indexes/relation-index.yml"
+    assert paths.index("manifest.yml") == tmp_path / "indexes/manifest.yml"
     assert (
         paths.knowledgebase_index("kb-1-knowledge-index.md")
         == tmp_path / "indexes/knowledgebase/kb-1-knowledge-index.md"

@@ -7,8 +7,8 @@ import importlib.resources
 import json
 import os
 import re
-import time
 import tempfile
+import time
 from dataclasses import dataclass
 from datetime import date, datetime
 from html import escape
@@ -37,15 +37,13 @@ KNOWLEDGE_REJECT_OPERATION = "kb.knowledge.reject"
 KNOWLEDGE_MERGE_OPERATION = "kb.knowledge.merge"
 KNOWLEDGE_DEPRECATE_OPERATION = "kb.knowledge.deprecate"
 KNOWLEDGEBASE_CREATE_OPERATION = "kb.knowledgebase.create"
+KNOWLEDGEBASE_INIT_OPERATION = "kb.knowledgebase.init"
 KNOWLEDGEBASE_MAP_OPERATION = "kb.knowledgebase.map"
 NOTE_ADD_OPERATION = "kb.note.add"
 NOTE_GET_OPERATION = "kb.note.get"
 NOTE_DEPRECATE_OPERATION = "kb.note.deprecate"
 INDEX_REBUILD_OPERATION = "kb.index.rebuild"
 CLEAN_INSPECT_OPERATION = "kb.clean.inspect"
-RELATION_TYPES = frozenset({"agrees", "conflicts", "related_to", "child_of"})
-HIERARCHY_RELATION_TYPE = "child_of"
-RELATION_TYPE_LIST = ", ".join(sorted(RELATION_TYPES))
 
 INIT_DIRECTORIES = (
     ".lark/logs",
@@ -95,7 +93,6 @@ indexes:
   - source-index.md
   - knowledge-index.md
   - tag-index.md
-  - relation-index.yml
   - kb-index.md
   - note-index.md
   - review-queue.md
@@ -103,7 +100,6 @@ indexes:
     "indexes/source-index.md": "# Source Index\n\n",
     "indexes/knowledge-index.md": "# Knowledge Index\n\n",
     "indexes/tag-index.md": "# Tag Index\n\n",
-    "indexes/relation-index.yml": "relations: []\n",
     "indexes/kb-index.md": "# Knowledge Base Index\n\n",
     "indexes/note-index.md": "# Note Index\n\n",
     "indexes/review-queue.md": "# Review Queue\n\n",
@@ -166,13 +162,6 @@ class SourceInput:
     original_url: str | None = None
 
 
-@dataclass(frozen=True)
-class KnowledgebaseMembershipUpdate:
-    relative_path: str
-    original: MarkdownDocument
-    updated: MarkdownDocument
-
-
 SUPPORTED_SOURCE_SUFFIXES = {".md", ".pdf"}
 SUPPORTED_SOURCE_URL_SCHEMES = {"http", "https"}
 MAX_URL_DOWNLOAD_BYTES = 5 * 1024 * 1024
@@ -184,7 +173,6 @@ INDEX_SCOPES = {
     "knowledge",
     "knowledgebase",
     "note",
-    "relation",
     "review_queue",
     "tag",
 }
@@ -196,16 +184,11 @@ INDEX_MARKDOWN_PATHS = (
     "indexes/note-index.md",
     "indexes/review-queue.md",
 )
-INDEX_YAML_PATHS = ("indexes/relation-index.yml",)
-CANDIDATE_RELATION_SHAPE = (
-    "candidate relations must be [] when there are no relations, or mappings like "
-    "{'type': 'related_to', 'target': 'knowledge-YYYYMMDD-001'} where type is one of "
-    f"{RELATION_TYPE_LIST} and target is an existing accepted knowledge ID"
-)
-REVIEW_RELATION_SHAPE = (
-    "reviewed relations must be [] when there are no relations, or mappings like "
-    "{'type': 'related_to', 'target': 'knowledge-YYYYMMDD-001'} where type is one of "
-    f"{RELATION_TYPE_LIST} and target is an existing knowledge ID"
+INDEX_YAML_PATHS: tuple[str, ...] = ()
+BINDTO_SHAPE = (
+    "bindto must be [] when there are no knowledgebase bindings, or mappings like "
+    "{'kb_id': 'kb-YYYYMMDD-001-title', 'outline_node': 'node-id', "
+    "'reason': 'reviewed binding reason'}"
 )
 EVIDENCE_SHAPE = (
     "evidence items must be mappings like {'source_id': '<requested-source-or-note-id>', "
@@ -482,7 +465,6 @@ def candidate_create(
     root: str | Path = ".",
     *,
     source_ids: list[str] | None = None,
-    note_ids: list[str] | None = None,
     resume_token: str | None = None,
     llm_result: dict[str, Any] | None = None,
     dry_run: bool = False,
@@ -490,20 +472,20 @@ def candidate_create(
     """Create pending candidates through the candidate-create LLM boundary."""
 
     source_ids = source_ids or []
-    note_ids = note_ids or []
-    token_payload = {"source_ids": source_ids, "note_ids": note_ids}
+    token_payload = {"source_ids": source_ids}
 
     try:
         workspace = Workspace(root)
         repository = ObjectRepository(workspace)
-        upstream = _validate_upstream_refs(repository, source_ids, note_ids)
+        upstream = _validate_source_refs(repository, source_ids)
+        active_kbs = _active_knowledgebase_context(repository)
         warnings = _deprecated_source_warnings(upstream)
     except (KBManagerError, OSError) as exc:
         return _failed(
             CANDIDATE_CREATE_OPERATION,
             "invalid_reference",
             str(exc),
-            "Provide at least one existing source or note reference.",
+            "Provide at least one existing source reference.",
         )
 
     if resume_token is None:
@@ -517,12 +499,16 @@ def candidate_create(
                 "must_preserve_upstream_refs",
                 "must_include_evidence",
                 "must_not_create_accepted_knowledge",
+                "must_use_existing_outline_nodes_for_bindto",
             ],
-            token_payload=token_payload,
+            token_payload={**token_payload, "active_knowledgebases": active_kbs},
             warnings=warnings,
         )
 
-    if resume_token != _resume_token(CANDIDATE_CREATE_OPERATION, token_payload):
+    if resume_token != _resume_token(
+        CANDIDATE_CREATE_OPERATION,
+        {**token_payload, "active_knowledgebases": active_kbs},
+    ):
         return _failed(
             CANDIDATE_CREATE_OPERATION,
             "invalid_resume_token",
@@ -532,7 +518,7 @@ def candidate_create(
 
     try:
         drafts = _validate_candidate_llm_result(llm_result)
-        records = _plan_candidate_records(repository, drafts, source_ids, note_ids)
+        records = _plan_candidate_records(repository, drafts, source_ids)
         created = [f"candidates/pending/{record['id']}.md" for record in records]
         diffs = [{"action": "create", "kind": "candidate", "path": path} for path in created]
         if dry_run:
@@ -646,10 +632,10 @@ def knowledge_accept(
     reviewed_by: str | None = None,
     reason: str | None = None,
     title: str | None = None,
-    body: str | None = None,
-    tags: list[str] | None = None,
-    kb_ids: list[str] | None = None,
-    relations: list[dict[str, Any]] | None = None,
+    summary: str | None = None,
+    content: str | None = None,
+    evidence: list[dict[str, Any]] | None = None,
+    bindto: list[dict[str, Any]] | None = None,
     dry_run: bool = False,
 ) -> ApiResult:
     """Promote a pending candidate to accepted knowledge after user review."""
@@ -664,33 +650,23 @@ def knowledge_accept(
         document = repository.read_markdown(workspace.relative(record.path))
         _validate_required_accept_content(
             title=title,
-            body=body,
-            tags=tags,
-            kb_ids=kb_ids,
-            relations=relations,
+            summary=summary,
+            content=content,
+            evidence=evidence,
+            bindto=bindto,
         )
-        _validate_knowledge_review_refs(
-            repository,
-            kb_ids or [],
-            relations or [],
-            self_knowledge_id=candidate_id,
-        )
+        reviewed_evidence = evidence or []
+        _validate_reviewed_evidence_from_candidate(reviewed_evidence, document.frontmatter)
+        _validate_bindto(repository, bindto or [])
         today = _today()
         accepted_frontmatter = {
             "id": candidate_id,
             "type": "knowledge",
             "title": title or document.frontmatter["title"],
             "status": "accepted",
-            "tags": tags if tags is not None else document.frontmatter.get("suggested_tags", []),
-            "source_refs": document.frontmatter.get("source_refs", []),
-            "note_refs": document.frontmatter.get("note_refs", []),
-            "evidence": document.frontmatter.get("evidence", []),
-            "kb_ids": (
-                kb_ids if kb_ids is not None else document.frontmatter.get("suggested_kb_ids", [])
-            ),
-            "relations": (
-                relations if relations is not None else document.frontmatter.get("relations", [])
-            ),
+            "summary": summary,
+            "evidence": reviewed_evidence,
+            "bindto": bindto or [],
             "reviewed_by": reviewed_by,
             "reviewed_at": today,
             "review_decision": "accept",
@@ -703,14 +679,7 @@ def knowledge_accept(
         knowledge_path = f"knowledge/atomic/{candidate_id}.md"
         if workspace.resolve(knowledge_path).exists():
             raise RepositoryError(f"knowledge already exists: {knowledge_path}")
-        accepted_body = _knowledge_body(body, document.body)
-        membership_updates = _plan_knowledgebase_membership_updates(
-            repository,
-            workspace,
-            knowledge_id=candidate_id,
-            old_kb_ids=[],
-            new_kb_ids=accepted_frontmatter["kb_ids"],
-        )
+        accepted_body = _knowledge_body(content, document.body)
         diffs = [
             {"action": "create", "kind": "knowledge", "path": knowledge_path},
             {
@@ -718,27 +687,21 @@ def knowledge_accept(
                 "kind": "candidate",
                 "path": str(workspace.relative(record.path)),
             },
-            *[
-                {"action": "update", "kind": "knowledge-base", "path": update.relative_path}
-                for update in membership_updates
-            ],
         ]
         if dry_run:
             return ApiResult.success(
                 KNOWLEDGE_ACCEPT_OPERATION,
                 objects=ObjectChanges(
                     created=[knowledge_path],
-                    updated=[update.relative_path for update in membership_updates],
                 ),
                 diffs=diffs,
-                extra={"knowledge_id": candidate_id, "kb_ids": accepted_frontmatter["kb_ids"]},
+                extra={"knowledge_id": candidate_id, "bindto": accepted_frontmatter["bindto"]},
             )
         _promote_candidate_to_knowledge(
             repository,
             record.path,
             knowledge_path,
             MarkdownDocument(frontmatter=accepted_frontmatter, body=accepted_body),
-            membership_updates,
         )
     except (KBManagerError, OSError) as exc:
         return _failed(
@@ -753,10 +716,9 @@ def knowledge_accept(
         KNOWLEDGE_ACCEPT_OPERATION,
         objects=ObjectChanges(
             created=[knowledge_path],
-            updated=[update.relative_path for update in membership_updates],
         ),
         diffs=diffs,
-        extra={"knowledge_id": candidate_id, "kb_ids": accepted_frontmatter["kb_ids"]},
+        extra={"knowledge_id": candidate_id, "bindto": accepted_frontmatter["bindto"]},
     )
 
 
@@ -819,10 +781,10 @@ def knowledge_merge(
     reviewed_by: str | None = None,
     reason: str | None = None,
     title: str | None = None,
-    body: str | None = None,
-    tags: list[str] | None = None,
-    kb_ids: list[str] | None = None,
-    relations: list[dict[str, Any]] | None = None,
+    summary: str | None = None,
+    content: str | None = None,
+    evidence: list[dict[str, Any]] | None = None,
+    bindto: list[dict[str, Any]] | None = None,
     dry_run: bool = False,
 ) -> ApiResult:
     """Merge a reviewed candidate into an existing knowledge object."""
@@ -842,17 +804,14 @@ def knowledge_merge(
         if knowledge_record.status != "accepted":
             raise RepositoryError(f"target knowledge must be accepted: {target_knowledge_id}")
         _validate_required_merge_content(
-            body=body,
-            tags=tags,
-            kb_ids=kb_ids,
-            relations=relations,
+            summary=summary,
+            content=content,
+            evidence=evidence,
+            bindto=bindto,
         )
-        _validate_knowledge_review_refs(
-            repository,
-            kb_ids or [],
-            relations or [],
-            self_knowledge_id=target_knowledge_id,
-        )
+        source_ids = _validate_evidence_references_sources(repository, evidence or [])
+        _validate_evidence(repository, evidence or [], source_ids)
+        _validate_bindto(repository, bindto or [])
         candidate_document = repository.read_markdown(workspace.relative(candidate_record.path))
         knowledge_document = repository.read_markdown(workspace.relative(knowledge_record.path))
         today = _today()
@@ -860,32 +819,9 @@ def knowledge_merge(
         merged_frontmatter.update(
             {
                 "title": title or knowledge_document.frontmatter["title"],
-                "tags": tags
-                if tags is not None
-                else _merged_strings(
-                    knowledge_document.frontmatter.get("tags", []),
-                    candidate_document.frontmatter.get("suggested_tags", []),
-                ),
-                "source_refs": _merged_strings(
-                    knowledge_document.frontmatter.get("source_refs", []),
-                    candidate_document.frontmatter.get("source_refs", []),
-                ),
-                "note_refs": _merged_strings(
-                    knowledge_document.frontmatter.get("note_refs", []),
-                    candidate_document.frontmatter.get("note_refs", []),
-                ),
-                "evidence": knowledge_document.frontmatter.get("evidence", [])
-                + candidate_document.frontmatter.get("evidence", []),
-                "kb_ids": kb_ids
-                if kb_ids is not None
-                else _merged_strings(
-                    knowledge_document.frontmatter.get("kb_ids", []),
-                    candidate_document.frontmatter.get("suggested_kb_ids", []),
-                ),
-                "relations": relations
-                if relations is not None
-                else knowledge_document.frontmatter.get("relations", [])
-                + candidate_document.frontmatter.get("relations", []),
+                "summary": summary,
+                "evidence": evidence or [],
+                "bindto": bindto or [],
                 "reviewed_by": reviewed_by,
                 "reviewed_at": today,
                 "review_decision": "merge",
@@ -902,20 +838,9 @@ def knowledge_merge(
         )
         knowledge_relative = str(workspace.relative(knowledge_record.path))
         rejected_relative = f"candidates/rejected/{candidate_id}.md"
-        membership_updates = _plan_knowledgebase_membership_updates(
-            repository,
-            workspace,
-            knowledge_id=target_knowledge_id,
-            old_kb_ids=knowledge_document.frontmatter.get("kb_ids", []),
-            new_kb_ids=merged_frontmatter["kb_ids"],
-        )
         diffs = [
             {"action": "update", "kind": "knowledge", "path": knowledge_relative},
             {"action": "move", "kind": "candidate", "path": rejected_relative},
-            *[
-                {"action": "update", "kind": "knowledge-base", "path": update.relative_path}
-                for update in membership_updates
-            ],
         ]
         if dry_run:
             return ApiResult.success(
@@ -924,14 +849,13 @@ def knowledge_merge(
                     updated=[
                         knowledge_relative,
                         rejected_relative,
-                        *[update.relative_path for update in membership_updates],
                     ]
                 ),
                 diffs=diffs,
                 extra={
                     "knowledge_id": target_knowledge_id,
                     "rejected_candidate_id": candidate_id,
-                    "kb_ids": merged_frontmatter["kb_ids"],
+                    "bindto": merged_frontmatter["bindto"],
                 },
             )
         _merge_candidate_into_knowledge(
@@ -943,10 +867,9 @@ def knowledge_merge(
             knowledge_relative,
             MarkdownDocument(
                 frontmatter=merged_frontmatter,
-                body=_knowledge_body(body, knowledge_document.body),
+                body=_knowledge_body(content, knowledge_document.body),
             ),
             knowledge_document,
-            membership_updates,
         )
     except (KBManagerError, OSError) as exc:
         return _failed(
@@ -963,14 +886,13 @@ def knowledge_merge(
             updated=[
                 knowledge_relative,
                 rejected_relative,
-                *[update.relative_path for update in membership_updates],
             ]
         ),
         diffs=diffs,
         extra={
             "knowledge_id": target_knowledge_id,
             "rejected_candidate_id": candidate_id,
-            "kb_ids": merged_frontmatter["kb_ids"],
+            "bindto": merged_frontmatter["bindto"],
         },
     )
 
@@ -1044,19 +966,10 @@ def knowledgebase_create(
     root: str | Path = ".",
     *,
     title: str,
-    description: str,
-    acceptance_criteria: str,
-    tags: list[str] | None = None,
-    body: str | None = None,
     knowledgebase_id: str | None = None,
-    decision: str | None = None,
-    reviewed_by: str | None = None,
     dry_run: bool = False,
 ) -> ApiResult:
-    """Create a user-approved knowledge base object."""
-
-    if not _has_review_decision(decision, reviewed_by, "approve"):
-        return _needs_review(KNOWLEDGEBASE_CREATE_OPERATION, ["approve", "revise"])
+    """Create a minimal initializing knowledge base shell."""
 
     try:
         workspace = Workspace(root)
@@ -1064,9 +977,6 @@ def knowledgebase_create(
         _validate_knowledgebase_input(
             repository,
             title=title,
-            description=description,
-            acceptance_criteria=acceptance_criteria,
-            tags=tags,
             knowledgebase_id=knowledgebase_id,
         )
         today = _today()
@@ -1078,20 +988,19 @@ def knowledgebase_create(
             "id": kb_id,
             "type": "knowledge-base",
             "title": title.strip(),
-            "status": "active",
-            "description": description.strip(),
-            "acceptance_criteria": acceptance_criteria.strip(),
-            "knowledge_ids": [],
-            "tags": tags or [],
-            "reviewed_by": reviewed_by,
-            "reviewed_at": today,
-            "review_decision": "approve",
+            "status": "initializing",
+            "description": "",
+            "tags": [],
+            "scope": {"includes": [], "excludes": []},
+            "outline": [],
+            "reviewed_at": None,
+            "review_decision": None,
             "created": today,
             "updated": today,
         }
         document = MarkdownDocument(
             frontmatter=frontmatter,
-            body=_knowledgebase_body(description, acceptance_criteria, body),
+            body=_knowledgebase_body("", {"includes": [], "excludes": []}, []),
         )
         diffs = [{"action": "create", "kind": "knowledge-base", "path": relative_path}]
         if dry_run:
@@ -1116,6 +1025,138 @@ def knowledgebase_create(
         objects=ObjectChanges(created=[relative_path]),
         diffs=diffs,
         extra={"knowledgebase_id": kb_id, "path": relative_path},
+    )
+
+
+def knowledgebase_init(
+    root: str | Path = ".",
+    *,
+    knowledgebase_id: str,
+    input_path: str | Path,
+    resume_token: str | None = None,
+    llm_result: dict[str, Any] | None = None,
+    review: dict[str, Any] | None = None,
+    reviewed_payload: dict[str, Any] | None = None,
+    dry_run: bool = False,
+) -> ApiResult:
+    """Initialize a knowledge base from temporary source-like context."""
+
+    input_text = str(input_path)
+    token_payload = {"knowledgebase_id": knowledgebase_id, "input_path": input_text}
+    try:
+        workspace = Workspace(root)
+        repository = ObjectRepository(workspace)
+        kb_record = _find_single_object(
+            repository,
+            knowledgebase_id,
+            expected_type="knowledge-base",
+        )
+        if kb_record.status == "archived":
+            raise RepositoryError(f"knowledgebase is archived: {knowledgebase_id}")
+        context = _knowledgebase_init_context(workspace, input_path)
+    except (KBManagerError, OSError) as exc:
+        return _failed(
+            KNOWLEDGEBASE_INIT_OPERATION,
+            "knowledgebase_init_failed",
+            str(exc),
+            "Provide an existing non-archived knowledgebase and readable input.",
+        )
+
+    if resume_token is None:
+        return _needs_llm(
+            KNOWLEDGEBASE_INIT_OPERATION,
+            purpose="knowledgebase_create",
+            system_prompt="knowledgebase-create",
+            required_context=[input_text],
+            output_schema="knowledgebase_create_draft",
+            constraints=[
+                "temporary_input_only",
+                "must_not_create_source_objects",
+                "requires_user_review_before_write",
+            ],
+            token_payload={**token_payload, "context": context},
+        )
+
+    if resume_token != _resume_token(
+        KNOWLEDGEBASE_INIT_OPERATION,
+        {**token_payload, "context": context},
+    ):
+        return _failed(
+            KNOWLEDGEBASE_INIT_OPERATION,
+            "invalid_resume_token",
+            "Resume token does not match this knowledgebase.init request.",
+            "Restart kb.knowledgebase.init and use the returned resume token.",
+        )
+
+    if not _review_approved(review):
+        try:
+            draft = _validate_knowledgebase_init_payload(llm_result)
+        except (KBManagerError, OSError) as exc:
+            return _failed(
+                KNOWLEDGEBASE_INIT_OPERATION,
+                "invalid_knowledgebase_draft",
+                str(exc),
+                "Return description, tags, scope, and outline for user review.",
+            )
+        return ApiResult(
+            status=ApiStatus.NEEDS_REVIEW,
+            operation=KNOWLEDGEBASE_INIT_OPERATION,
+            review=ReviewRequest(required=True, options=["approve", "reject", "revise"]),
+            next_actions=["Review the knowledgebase draft, then resume with approved payload."],
+            extra={
+                "draft": draft,
+                "resume": {
+                    "operation": KNOWLEDGEBASE_INIT_OPERATION,
+                    "token": resume_token,
+                },
+            },
+        )
+
+    try:
+        payload = _validate_knowledgebase_init_payload(reviewed_payload)
+        document = repository.read_markdown(workspace.relative(kb_record.path))
+        today = _today()
+        frontmatter = dict(document.frontmatter)
+        frontmatter.update(
+            {
+                "status": "active",
+                "description": payload["description"],
+                "tags": payload["tags"],
+                "scope": payload["scope"],
+                "outline": payload["outline"],
+                "reviewed_at": str((review or {}).get("reviewed_at") or today),
+                "review_decision": "approve",
+                "updated": today,
+            }
+        )
+        relative_path = str(workspace.relative(kb_record.path))
+        updated_document = MarkdownDocument(
+            frontmatter=frontmatter,
+            body=_knowledgebase_body(payload["description"], payload["scope"], payload["outline"]),
+        )
+        diffs = [{"action": "update", "kind": "knowledge-base", "path": relative_path}]
+        if dry_run:
+            return ApiResult.success(
+                KNOWLEDGEBASE_INIT_OPERATION,
+                objects=ObjectChanges(updated=[relative_path]),
+                diffs=diffs,
+                extra={"knowledgebase_id": knowledgebase_id, "path": relative_path},
+            )
+        repository.write_markdown(relative_path, updated_document, overwrite=True)
+    except (KBManagerError, OSError) as exc:
+        return _failed(
+            KNOWLEDGEBASE_INIT_OPERATION,
+            "knowledgebase_init_failed",
+            str(exc),
+            "Provide an approved reviewed payload with description, tags, scope, and outline.",
+        )
+
+    return _success_with_index_rebuild(
+        workspace.root,
+        KNOWLEDGEBASE_INIT_OPERATION,
+        objects=ObjectChanges(updated=[relative_path]),
+        diffs=diffs,
+        extra={"knowledgebase_id": knowledgebase_id, "path": relative_path},
     )
 
 
@@ -1467,7 +1508,6 @@ def _build_index_files(records: list[ObjectRecord], workspace: Workspace) -> dic
         "indexes/source-index.md": _source_index(sources, workspace),
         "indexes/knowledge-index.md": _knowledge_index(knowledge, workspace),
         "indexes/tag-index.md": _tag_index(visible_records),
-        "indexes/relation-index.yml": _relation_index_yaml(knowledge, candidates),
         "indexes/kb-index.md": _kb_index(knowledgebases, knowledge, workspace),
         "indexes/note-index.md": _note_index(notes, workspace),
         "indexes/review-queue.md": _review_queue_index(candidates, workspace),
@@ -1486,55 +1526,64 @@ def _knowledgebase_map_markdown(
     knowledgebase_id: str | None,
 ) -> tuple[str, list[dict[str, str]]]:
     visible_records = _without_deprecated(records)
+    knowledgebases = [
+        record
+        for record in _records_by_type(visible_records, "knowledge-base")
+        if record.status == "active"
+    ]
+    if knowledgebase_id is not None:
+        knowledgebases = [
+            record for record in knowledgebases if record.object_id == knowledgebase_id
+        ]
+        if not knowledgebases:
+            raise RepositoryError(f"knowledgebase not found: {knowledgebase_id}")
     knowledge = [
         record
         for record in _records_by_type(visible_records, "knowledge")
         if record.status == "accepted"
     ]
-    if knowledgebase_id is not None:
-        knowledgebases = _records_by_type(visible_records, "knowledge-base")
-        kb_record = next(
-            (record for record in knowledgebases if record.object_id == knowledgebase_id),
-            None,
-        )
-        if kb_record is None:
-            raise RepositoryError(f"knowledgebase not found: {knowledgebase_id}")
-        knowledge_ids = set(_knowledge_ids_for_base(kb_record, knowledge))
-        knowledge = [record for record in knowledge if record.object_id in knowledge_ids]
+    issues = _bindto_consistency_issues(knowledgebases, knowledge)
 
-    issues = _knowledge_hierarchy_issues(knowledge, workspace)
-    by_id = {record.object_id: record for record in knowledge}
-    children: dict[str, list[ObjectRecord]] = {record.object_id: [] for record in knowledge}
-    roots: list[ObjectRecord] = []
-    for record in knowledge:
-        parent_id = _child_of_target(record)
-        if parent_id and parent_id in by_id:
-            children[parent_id].append(record)
-        else:
-            roots.append(record)
-
-    for siblings in children.values():
-        siblings.sort(key=_record_sort_key)
-    roots.sort(key=_record_sort_key)
-
-    title = "Knowledgebase Map"
-    if knowledgebase_id is not None:
-        title = f"Knowledgebase Map: {knowledgebase_id}"
+    title = (
+        "Knowledgebase Map"
+        if knowledgebase_id is None
+        else f"Knowledgebase Map: {knowledgebase_id}"
+    )
     lines = [
         f"# {title}",
         "",
         "```mermaid",
         "flowchart TD",
     ]
-    if not knowledge:
-        lines.append('  empty["No accepted knowledge"]')
-    else:
-        for record in sorted(knowledge, key=_record_sort_key):
-            lines.append(f"  {_mermaid_node_id(record.object_id)}[\"{_mermaid_label(record)}\"]")
-        edges = _mermaid_tree_edges(roots, children)
-        if edges:
-            lines.append("")
-            lines.extend(edges)
+    if not knowledgebases:
+        lines.append('  empty["No active knowledgebase"]')
+    for kb_record in knowledgebases:
+        kb_node = _mermaid_node_id(kb_record.object_id)
+        lines.append(f"  {kb_node}[\"{_mermaid_label(kb_record)}\"]")
+        outline_nodes = _outline_nodes_with_labels(kb_record.metadata.get("outline", []))
+        for node_id, label, parent_id in outline_nodes:
+            outline_node = _mermaid_node_id(f"{kb_record.object_id}-{node_id}")
+            label_text = (
+                f"{escape(label, quote=True)}<br/><code>"
+                f"{escape(node_id, quote=True)}</code>"
+            )
+            lines.append(f"  {outline_node}[\"{label_text}\"]")
+            parent_node = (
+                kb_node
+                if parent_id is None
+                else _mermaid_node_id(f"{kb_record.object_id}-{parent_id}")
+            )
+            lines.append(f"  {parent_node} --> {outline_node}")
+        for knowledge_record in knowledge:
+            for binding in knowledge_record.metadata.get("bindto", []):
+                if not isinstance(binding, dict) or binding.get("kb_id") != kb_record.object_id:
+                    continue
+                knowledge_node = _mermaid_node_id(knowledge_record.object_id)
+                lines.append(f"  {knowledge_node}[\"{_mermaid_label(knowledge_record)}\"]")
+                outline_node = _mermaid_node_id(
+                    f"{kb_record.object_id}-{binding.get('outline_node')}"
+                )
+                lines.append(f"  {outline_node} --> {knowledge_node}")
     lines.extend(["```", ""])
     if issues:
         lines.extend(["## Issues", ""])
@@ -1604,16 +1653,13 @@ def _filter_index_files(
         "candidate": {
             "indexes/review-queue.md",
             "indexes/tag-index.md",
-            "indexes/relation-index.yml",
         },
         "knowledge": {
             "indexes/knowledge-index.md",
             "indexes/tag-index.md",
-            "indexes/relation-index.yml",
         },
         "knowledgebase": {"indexes/kb-index.md"},
         "note": {"indexes/note-index.md"},
-        "relation": {"indexes/relation-index.yml"},
         "review_queue": {"indexes/review-queue.md"},
         "tag": {"indexes/tag-index.md"},
     }[scope]
@@ -1666,7 +1712,7 @@ def _knowledge_index(records: list[ObjectRecord], workspace: Workspace) -> str:
     lines = [
         "# Knowledge Index",
         "",
-        "| ID | Title | Status | Tags | Knowledge Bases | Path |",
+        "| ID | Title | Status | Summary | Knowledge Bases | Path |",
         "| --- | --- | --- | --- | --- | --- |",
     ]
     for record in records:
@@ -1676,8 +1722,10 @@ def _knowledge_index(records: list[ObjectRecord], workspace: Workspace) -> str:
                     record.object_id,
                     _metadata_text(record, "title"),
                     record.status,
-                    _join_strings(record.metadata.get("tags", [])),
-                    _join_strings(record.metadata.get("kb_ids", [])),
+                    _metadata_text(record, "summary"),
+                    _join_strings(
+                        _knowledgebase_ids_from_bindto(record.metadata.get("bindto", []))
+                    ),
                     str(workspace.relative(record.path)),
                 ]
             )
@@ -1699,24 +1747,6 @@ def _tag_index(records: list[ObjectRecord]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _relation_index_yaml(
-    knowledge: list[ObjectRecord],
-    candidates: list[ObjectRecord],
-) -> str:
-    relations: list[dict[str, Any]] = []
-    for record in knowledge + candidates:
-        for relation in record.metadata.get("relations", []):
-            if isinstance(relation, dict):
-                item = dict(relation)
-                item["source"] = record.object_id
-                relations.append(item)
-    return yaml.safe_dump(
-        {"relations": relations},
-        sort_keys=False,
-        allow_unicode=True,
-    )
-
-
 def _kb_index(
     knowledgebases: list[ObjectRecord],
     knowledge: list[ObjectRecord],
@@ -1729,14 +1759,14 @@ def _kb_index(
         "| --- | --- | --- | --- | --- | --- |",
     ]
     for record in knowledgebases:
-        knowledge_ids = _knowledge_ids_for_base(record, knowledge)
+        bound_knowledge_ids = _bound_knowledge_ids_for_base(record, knowledge)
         lines.append(
             _table_row(
                 [
                     record.object_id,
                     _metadata_text(record, "title"),
                     record.status,
-                    str(len(knowledge_ids)),
+                    str(len(bound_knowledge_ids)),
                     _join_strings(record.metadata.get("tags", [])),
                     str(workspace.relative(record.path)),
                 ]
@@ -1784,7 +1814,7 @@ def _review_queue_index(records: list[ObjectRecord], workspace: Workspace) -> st
                     record.object_id,
                     _metadata_text(record, "title"),
                     str(record.metadata.get("created", "")),
-                    _join_strings(record.metadata.get("source_refs", [])),
+                    _join_strings(_source_ids_from_evidence(record.metadata.get("evidence", []))),
                     str(workspace.relative(record.path)),
                 ]
             )
@@ -1797,7 +1827,7 @@ def _knowledgebase_knowledge_index(
     knowledge: list[ObjectRecord],
     workspace: Workspace,
 ) -> str:
-    knowledge_ids = set(_knowledge_ids_for_base(kb_record, knowledge))
+    bound_knowledge_ids = set(_bound_knowledge_ids_for_base(kb_record, knowledge))
     lines = [
         f"# Knowledge Index: {kb_record.object_id}",
         "",
@@ -1805,7 +1835,7 @@ def _knowledgebase_knowledge_index(
         "| --- | --- | --- | --- | --- |",
     ]
     for record in knowledge:
-        if record.object_id not in knowledge_ids:
+        if record.object_id not in bound_knowledge_ids:
             continue
         lines.append(
             _table_row(
@@ -1821,12 +1851,17 @@ def _knowledgebase_knowledge_index(
     return "\n".join(lines) + "\n"
 
 
-def _knowledge_ids_for_base(kb_record: ObjectRecord, knowledge: list[ObjectRecord]) -> list[str]:
-    knowledge_ids = set(_string_items(kb_record.metadata.get("knowledge_ids", [])))
+def _bound_knowledge_ids_for_base(
+    kb_record: ObjectRecord,
+    knowledge: list[ObjectRecord],
+) -> list[str]:
+    bound_ids: set[str] = set()
     for record in knowledge:
-        if kb_record.object_id in _string_items(record.metadata.get("kb_ids", [])):
-            knowledge_ids.add(record.object_id)
-    return sorted(knowledge_ids)
+        if kb_record.object_id in _knowledgebase_ids_from_bindto(
+            record.metadata.get("bindto", [])
+        ):
+            bound_ids.add(record.object_id)
+    return sorted(bound_ids)
 
 
 def _index_diffs(workspace: Workspace, planned_indexes: dict[str, str]) -> list[dict[str, Any]]:
@@ -1912,8 +1947,17 @@ def _consistency_issues(records: list[ObjectRecord], workspace: Workspace) -> li
 
     for record in records:
         _append_reference_issues(record, by_id, issues)
-    _append_knowledgebase_membership_issues(records, issues)
-    _append_relation_consistency_issues(records, by_id, workspace, issues)
+    knowledgebases = [
+        record
+        for record in records
+        if record.object_type == "knowledge-base" and record.status == "active"
+    ]
+    knowledge = [
+        record
+        for record in records
+        if record.object_type == "knowledge" and record.status == "accepted"
+    ]
+    issues.extend(_bindto_consistency_issues(knowledgebases, knowledge))
     return issues
 
 
@@ -1923,11 +1967,6 @@ def _append_reference_issues(
     issues: list[dict[str, str]],
 ) -> None:
     field_types = {
-        "source_refs": "source",
-        "note_refs": "note",
-        "kb_ids": "knowledge-base",
-        "suggested_kb_ids": "knowledge-base",
-        "knowledge_ids": "knowledge",
     }
     for field_name, expected_type in field_types.items():
         for target_id in _string_items(record.metadata.get(field_name, [])):
@@ -1940,17 +1979,6 @@ def _append_reference_issues(
                 issues,
             )
 
-    for relation in record.metadata.get("relations", []):
-        if isinstance(relation, dict) and isinstance(relation.get("target"), str):
-            _append_missing_or_type_issue(
-                record,
-                "relations",
-                relation["target"],
-                "knowledge",
-                by_id,
-                issues,
-            )
-
     for evidence in record.metadata.get("evidence", []):
         if not isinstance(evidence, dict):
             continue
@@ -1958,200 +1986,78 @@ def _append_reference_issues(
         if isinstance(target_id, str):
             _append_missing_reference_issue(record, "evidence", target_id, by_id, issues)
 
-
-def _append_relation_consistency_issues(
-    records: list[ObjectRecord],
-    by_id: dict[str, list[ObjectRecord]],
-    workspace: Workspace,
-    issues: list[dict[str, str]],
-) -> None:
-    for record in records:
-        child_of_count = 0
-        for relation in record.metadata.get("relations", []):
-            if not isinstance(relation, dict):
-                issues.append(
-                    {
-                        "code": "invalid_relation_shape",
-                        "object_id": record.object_id,
-                        "message": "relation entries must be mappings with type and target",
-                        "path": str(workspace.relative(record.path)),
-                    }
-                )
-                continue
-            relation_type = relation.get("type")
-            target_id = relation.get("target")
-            if relation_type not in RELATION_TYPES:
-                issues.append(
-                    {
-                        "code": "unknown_relation_type",
-                        "object_id": record.object_id,
-                        "message": (
-                            f"unknown relation type: {relation_type}; expected one of "
-                            f"{RELATION_TYPE_LIST}"
-                        ),
-                        "path": str(workspace.relative(record.path)),
-                    }
-                )
-            if relation_type == HIERARCHY_RELATION_TYPE:
-                child_of_count += 1
-                if target_id == record.object_id:
-                    issues.append(
-                        {
-                            "code": "child_of_self",
-                            "object_id": record.object_id,
-                            "field": "relations",
-                            "target_id": str(target_id),
-                            "message": f"{record.object_id} child_of points to itself",
-                        }
-                    )
-                elif isinstance(target_id, str):
-                    matches = by_id.get(target_id, [])
-                    if not matches:
-                        issues.append(
-                            {
-                                "code": "child_of_missing_target",
-                                "object_id": record.object_id,
-                                "field": "relations",
-                                "target_id": target_id,
-                                "message": (
-                                    f"{record.object_id} child_of target is missing: "
-                                    f"{target_id}"
-                                ),
-                            }
-                        )
-                    elif not any(match.object_type == "knowledge" for match in matches):
-                        issues.append(
-                            {
-                                "code": "child_of_non_knowledge_target",
-                                "object_id": record.object_id,
-                                "field": "relations",
-                                "target_id": target_id,
-                                "message": (
-                                    f"{record.object_id} child_of target must be knowledge: "
-                                    f"{target_id}"
-                                ),
-                            }
-                        )
-        if child_of_count > 1:
-            issues.append(
-                {
-                    "code": "multiple_child_of",
-                    "object_id": record.object_id,
-                    "field": "relations",
-                    "message": f"{record.object_id} has multiple child_of relations",
-                }
-            )
-    issues.extend(_knowledge_hierarchy_cycle_issues(records))
-
-
-def _knowledge_hierarchy_issues(
-    records: list[ObjectRecord],
-    workspace: Workspace,
+def _bindto_consistency_issues(
+    knowledgebases: list[ObjectRecord],
+    knowledge: list[ObjectRecord],
 ) -> list[dict[str, str]]:
     issues: list[dict[str, str]] = []
-    by_id = {record.object_id: [record] for record in records}
-    _append_relation_consistency_issues(records, by_id, workspace, issues)
-    return issues
-
-
-def _knowledge_hierarchy_cycle_issues(records: list[ObjectRecord]) -> list[dict[str, str]]:
-    parent_by_child = {
-        record.object_id: parent_id
-        for record in records
-        if record.object_type == "knowledge"
-        for parent_id in [_child_of_target(record)]
-        if parent_id
-    }
-    issues: list[dict[str, str]] = []
-    reported: set[frozenset[str]] = set()
-    for start in sorted(parent_by_child):
-        path: list[str] = []
-        seen_at: dict[str, int] = {}
-        current: str | None = start
-        while current in parent_by_child:
-            if current in seen_at:
-                cycle = path[seen_at[current] :]
-                cycle_ids = frozenset(cycle)
-                cycle_key = " -> ".join(cycle + [current])
-                if cycle_ids not in reported:
-                    reported.add(cycle_ids)
-                    issues.append(
-                        {
-                            "code": "child_of_cycle",
-                            "object_id": start,
-                            "field": "relations",
-                            "message": f"child_of cycle detected: {cycle_key}",
-                        }
-                    )
-                break
-            seen_at[current] = len(path)
-            path.append(current)
-            current = parent_by_child.get(current)
-    return issues
-
-
-def _child_of_target(record: ObjectRecord) -> str | None:
-    for relation in record.metadata.get("relations", []):
-        if not isinstance(relation, dict):
+    kb_by_id = {record.object_id: record for record in knowledgebases}
+    for record in knowledge:
+        bindto = record.metadata.get("bindto", [])
+        if not isinstance(bindto, list):
+            issues.append(
+                {
+                    "code": "invalid_bindto_shape",
+                    "object_id": record.object_id,
+                    "field": "bindto",
+                    "message": f"{record.object_id}.bindto must be a list",
+                }
+            )
             continue
-        if relation.get("type") != HIERARCHY_RELATION_TYPE:
-            continue
-        target_id = relation.get("target")
-        if isinstance(target_id, str) and target_id.strip():
-            return target_id
-    return None
-
-
-def _append_knowledgebase_membership_issues(
-    records: list[ObjectRecord],
-    issues: list[dict[str, str]],
-) -> None:
-    knowledge_by_id = {
-        record.object_id: record for record in records if record.object_type == "knowledge"
-    }
-    kb_by_id = {
-        record.object_id: record for record in records if record.object_type == "knowledge-base"
-    }
-
-    for kb_record in kb_by_id.values():
-        kb_id = kb_record.object_id
-        for knowledge_id in _string_items(kb_record.metadata.get("knowledge_ids", [])):
-            knowledge_record = knowledge_by_id.get(knowledge_id)
-            if knowledge_record is None:
-                continue
-            if kb_id not in _string_items(knowledge_record.metadata.get("kb_ids", [])):
+        for item in bindto:
+            if not isinstance(item, dict):
                 issues.append(
                     {
-                        "code": "knowledgebase_membership_mismatch",
-                        "object_id": kb_id,
-                        "field": "knowledge_ids",
-                        "target_id": knowledge_id,
+                        "code": "invalid_bindto_shape",
+                        "object_id": record.object_id,
+                        "field": "bindto",
+                        "message": f"{record.object_id}.bindto entries must be mappings",
+                    }
+                )
+                continue
+            kb_id = item.get("kb_id")
+            outline_node = item.get("outline_node")
+            if not isinstance(kb_id, str) or kb_id not in kb_by_id:
+                issues.append(
+                    {
+                        "code": "invalid_bindto_kb",
+                        "object_id": record.object_id,
+                        "field": "bindto",
+                        "target_id": str(kb_id),
                         "message": (
-                            f"{kb_id}.knowledge_ids includes {knowledge_id}, "
-                            f"but {knowledge_id}.kb_ids does not include {kb_id}"
+                            f"{record.object_id}.bindto references missing active "
+                            f"knowledgebase {kb_id}"
                         ),
                     }
                 )
-
-    for knowledge_record in knowledge_by_id.values():
-        knowledge_id = knowledge_record.object_id
-        for kb_id in _string_items(knowledge_record.metadata.get("kb_ids", [])):
-            kb_record = kb_by_id.get(kb_id)
-            if kb_record is None:
                 continue
-            if knowledge_id not in _string_items(kb_record.metadata.get("knowledge_ids", [])):
+            if not isinstance(outline_node, str) or outline_node not in _outline_node_ids(
+                kb_by_id[kb_id].metadata.get("outline", [])
+            ):
                 issues.append(
                     {
-                        "code": "knowledgebase_membership_mismatch",
-                        "object_id": knowledge_id,
-                        "field": "kb_ids",
-                        "target_id": kb_id,
+                        "code": "invalid_bindto_outline_node",
+                        "object_id": record.object_id,
+                        "field": "bindto",
+                        "target_id": str(outline_node),
                         "message": (
-                            f"{knowledge_id}.kb_ids includes {kb_id}, "
-                            f"but {kb_id}.knowledge_ids does not include {knowledge_id}"
+                            f"{record.object_id}.bindto references missing outline node "
+                            f"{outline_node}"
                         ),
                     }
                 )
+    bound = {record.object_id for record in knowledge if record.metadata.get("bindto")}
+    for record in knowledge:
+        if record.object_id not in bound:
+            issues.append(
+                {
+                    "code": "unbound_knowledge",
+                    "object_id": record.object_id,
+                    "field": "bindto",
+                    "message": f"{record.object_id} is not bound to any knowledgebase outline node",
+                }
+            )
+    return issues
 
 
 def _append_missing_or_type_issue(
@@ -2217,6 +2123,18 @@ def _join_strings(value: Any) -> str:
     return ", ".join(_string_items(value))
 
 
+def _knowledgebase_ids_from_bindto(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    ids: list[str] = []
+    for item in value:
+        if isinstance(item, dict) and isinstance(item.get("kb_id"), str):
+            kb_id = item["kb_id"]
+            if kb_id not in ids:
+                ids.append(kb_id)
+    return ids
+
+
 def _table_row(values: list[str]) -> str:
     return "| " + " | ".join(_escape_table_cell(value) for value in values) + " |"
 
@@ -2258,58 +2176,21 @@ def _pending_candidate_record(
 def _validate_review_content(
     *,
     title: str | None,
-    body: str | None,
-    tags: list[str] | None,
-    kb_ids: list[str] | None,
-    relations: list[dict[str, Any]] | None,
+    summary: str | None,
+    content: str | None,
+    evidence: list[dict[str, Any]] | None,
+    bindto: list[dict[str, Any]] | None,
 ) -> None:
     if title is not None and not title.strip():
         raise RepositoryError("reviewed title must be non-empty when provided; expected string")
-    if body is not None and not body.strip():
-        raise RepositoryError("reviewed body must be non-empty when provided; expected string")
-    if tags is not None and not _is_string_list(tags):
-        raise RepositoryError("reviewed tags must be a list of strings; use [] when no tags")
-    if kb_ids is not None and not _is_string_list(kb_ids):
-        raise RepositoryError(
-            "reviewed kb_ids must be a list of strings; use [] when no knowledge bases"
-        )
-    if relations is not None and not _is_mapping_list(relations):
-        raise RepositoryError(REVIEW_RELATION_SHAPE)
-
-
-def _validate_knowledge_review_refs(
-    repository: ObjectRepository,
-    kb_ids: list[str],
-    relations: list[dict[str, Any]],
-    *,
-    self_knowledge_id: str,
-) -> None:
-    for kb_id in kb_ids:
-        record = _find_single_object(repository, kb_id)
-        if record.object_type != "knowledge-base":
-            raise RepositoryError(
-                f"reviewed kb_id must reference knowledge-base: {kb_id}; "
-                "remove it or create/pass an existing kb-YYYYMMDD-001 ID"
-            )
-    _validate_child_of_count(relations, REVIEW_RELATION_SHAPE)
-    for relation in relations:
-        relation_type = relation.get("type")
-        target_id = relation.get("target")
-        _validate_relation_type(relation_type, REVIEW_RELATION_SHAPE)
-        if not isinstance(target_id, str) or not target_id.strip():
-            raise RepositoryError(
-                f"{REVIEW_RELATION_SHAPE}; relation.target must be an existing knowledge ID"
-            )
-        if relation_type == HIERARCHY_RELATION_TYPE and target_id == self_knowledge_id:
-            raise RepositoryError("child_of relation must not target the same knowledge object")
-        if target_id == self_knowledge_id:
-            continue
-        record = _find_single_object(repository, target_id)
-        if record.object_type != "knowledge":
-            raise RepositoryError(
-                f"reviewed relation target must be knowledge: {target_id}; "
-                "remove non-knowledge targets or replace target with an existing knowledge ID"
-            )
+    if summary is not None and not summary.strip():
+        raise RepositoryError("reviewed summary must be non-empty when provided; expected string")
+    if content is not None and not content.strip():
+        raise RepositoryError("reviewed content must be non-empty when provided; expected string")
+    if evidence is not None and not _is_mapping_list(evidence):
+        raise RepositoryError(EVIDENCE_SHAPE)
+    if bindto is not None and not _is_mapping_list(bindto):
+        raise RepositoryError(BINDTO_SHAPE)
 
 
 def _validate_existing_refs(
@@ -2326,45 +2207,43 @@ def _validate_existing_refs(
 def _validate_required_accept_content(
     *,
     title: str | None,
-    body: str | None,
-    tags: list[str] | None,
-    kb_ids: list[str] | None,
-    relations: list[dict[str, Any]] | None,
+    summary: str | None,
+    content: str | None,
+    evidence: list[dict[str, Any]] | None,
+    bindto: list[dict[str, Any]] | None,
 ) -> None:
     _validate_review_content(
         title=title,
-        body=body,
-        tags=tags,
-        kb_ids=kb_ids,
-        relations=relations,
+        summary=summary,
+        content=content,
+        evidence=evidence,
+        bindto=bindto,
     )
-    if title is None or body is None or tags is None or kb_ids is None or relations is None:
+    if title is None or summary is None or content is None or evidence is None or bindto is None:
         raise RepositoryError(
-            "accept requires reviewed title, body, tags, kb_ids, and relations; "
-            "pass title/body as non-empty strings, tags/kb_ids as string lists, and "
-            "relations as [] or relation mappings"
+            "accept requires reviewed title, summary, content, evidence, and bindto; "
+            "pass bindto as [] or binding mappings"
         )
 
 
 def _validate_required_merge_content(
     *,
-    body: str | None,
-    tags: list[str] | None,
-    kb_ids: list[str] | None,
-    relations: list[dict[str, Any]] | None,
+    summary: str | None,
+    content: str | None,
+    evidence: list[dict[str, Any]] | None,
+    bindto: list[dict[str, Any]] | None,
 ) -> None:
     _validate_review_content(
         title=None,
-        body=body,
-        tags=tags,
-        kb_ids=kb_ids,
-        relations=relations,
+        summary=summary,
+        content=content,
+        evidence=evidence,
+        bindto=bindto,
     )
-    if body is None or tags is None or kb_ids is None or relations is None:
+    if summary is None or content is None or evidence is None or bindto is None:
         raise RepositoryError(
-            "merge requires reviewed body, tags, kb_ids, and relations; "
-            "pass body as a non-empty string, tags/kb_ids as string lists, and "
-            "relations as [] or relation mappings"
+            "merge requires reviewed summary, content, evidence, and bindto; "
+            "pass bindto as [] or binding mappings"
         )
 
 
@@ -2472,19 +2351,13 @@ def _promote_candidate_to_knowledge(
     candidate_path: Path,
     knowledge_path: str,
     knowledge_document: MarkdownDocument,
-    membership_updates: list[KnowledgebaseMembershipUpdate] | None = None,
 ) -> None:
     created: list[Path] = []
-    written_memberships: list[KnowledgebaseMembershipUpdate] = []
     try:
         target = repository.write_markdown(knowledge_path, knowledge_document)
         created.append(target)
-        for update in membership_updates or []:
-            repository.write_markdown(update.relative_path, update.updated, overwrite=True)
-            written_memberships.append(update)
         candidate_path.unlink()
     except Exception:
-        _rollback_membership_updates(repository, written_memberships)
         _rollback_created(created)
         raise
 
@@ -2515,16 +2388,11 @@ def _merge_candidate_into_knowledge(
     knowledge_relative: str,
     merged_knowledge: MarkdownDocument,
     original_knowledge: MarkdownDocument,
-    membership_updates: list[KnowledgebaseMembershipUpdate] | None = None,
 ) -> None:
     knowledge_updated = False
-    written_memberships: list[KnowledgebaseMembershipUpdate] = []
     try:
         repository.write_markdown(knowledge_relative, merged_knowledge, overwrite=True)
         knowledge_updated = True
-        for update in membership_updates or []:
-            repository.write_markdown(update.relative_path, update.updated, overwrite=True)
-            written_memberships.append(update)
         _move_candidate_document(
             repository,
             workspace,
@@ -2533,7 +2401,6 @@ def _merge_candidate_into_knowledge(
             rejected_candidate,
         )
     except Exception:
-        _rollback_membership_updates(repository, written_memberships)
         if knowledge_updated:
             repository.write_markdown(
                 knowledge_relative,
@@ -2543,82 +2410,14 @@ def _merge_candidate_into_knowledge(
         raise
 
 
-def _plan_knowledgebase_membership_updates(
-    repository: ObjectRepository,
-    workspace: Workspace,
-    *,
-    knowledge_id: str,
-    old_kb_ids: list[Any],
-    new_kb_ids: list[Any],
-) -> list[KnowledgebaseMembershipUpdate]:
-    old_ids = set(_string_items(old_kb_ids))
-    new_ids = set(_string_items(new_kb_ids))
-    updates: list[KnowledgebaseMembershipUpdate] = []
-    for kb_id in sorted(old_ids | new_ids):
-        record = _find_single_object(repository, kb_id, expected_type="knowledge-base")
-        relative_path = str(workspace.relative(record.path))
-        original = repository.read_markdown(relative_path)
-        updated = _knowledgebase_membership_document(
-            original,
-            knowledge_id=knowledge_id,
-            include=kb_id in new_ids,
-        )
-        if updated.frontmatter != original.frontmatter:
-            updates.append(
-                KnowledgebaseMembershipUpdate(
-                    relative_path=relative_path,
-                    original=original,
-                    updated=updated,
-                )
-            )
-    return updates
-
-
-def _knowledgebase_membership_document(
-    document: MarkdownDocument,
-    *,
-    knowledge_id: str,
-    include: bool,
-) -> MarkdownDocument:
-    frontmatter = dict(document.frontmatter)
-    knowledge_ids = _string_items(frontmatter.get("knowledge_ids", []))
-    if include and knowledge_id not in knowledge_ids:
-        knowledge_ids.append(knowledge_id)
-    if not include:
-        knowledge_ids = [item for item in knowledge_ids if item != knowledge_id]
-    frontmatter["knowledge_ids"] = knowledge_ids
-    frontmatter["updated"] = _today()
-    return MarkdownDocument(frontmatter=frontmatter, body=document.body)
-
-
-def _rollback_membership_updates(
-    repository: ObjectRepository,
-    updates: list[KnowledgebaseMembershipUpdate],
-) -> None:
-    for update in reversed(updates):
-        try:
-            repository.write_markdown(update.relative_path, update.original, overwrite=True)
-        except (KBManagerError, OSError):
-            pass
-
-
 def _validate_knowledgebase_input(
     repository: ObjectRepository,
     *,
     title: str,
-    description: str,
-    acceptance_criteria: str,
-    tags: list[str] | None,
     knowledgebase_id: str | None,
 ) -> None:
     if not isinstance(title, str) or not title.strip():
         raise RepositoryError("knowledge base title must be a non-empty string")
-    if not isinstance(description, str) or not description.strip():
-        raise RepositoryError("knowledge base description must be a non-empty string")
-    if not isinstance(acceptance_criteria, str) or not acceptance_criteria.strip():
-        raise RepositoryError("knowledge base acceptance criteria must be a non-empty string")
-    if tags is not None and not _is_string_list(tags):
-        raise RepositoryError("knowledge base tags must be a list of strings; use [] when empty")
     if knowledgebase_id is not None:
         if not ID_RE.match(knowledgebase_id) or not knowledgebase_id.startswith("kb-"):
             raise RepositoryError(
@@ -2636,14 +2435,184 @@ def _validate_knowledgebase_input(
             raise RepositoryError(f"knowledge base title already exists: {title.strip()}")
 
 
-def _knowledgebase_body(description: str, acceptance_criteria: str, body: str | None) -> str:
-    content = body.strip() if isinstance(body, str) and body.strip() else ""
-    sections = (
+def _knowledgebase_body(description: str, scope: dict[str, Any], outline: Any) -> str:
+    scope_text = yaml.safe_dump(scope, sort_keys=False, allow_unicode=True).strip()
+    outline_text = yaml.safe_dump(outline, sort_keys=False, allow_unicode=True).strip()
+    return (
         f"\n## Description\n\n{description.strip()}\n\n"
-        f"## Acceptance Criteria\n\n{acceptance_criteria.strip()}\n\n"
-        "## Knowledge List\n"
+        f"## Scope\n\n```yaml\n{scope_text}\n```\n\n"
+        f"## Outline\n\n```yaml\n{outline_text}\n```\n\n"
+        "## Derived Member View\n"
     )
-    return f"{sections}\n{content}\n"
+
+
+def _knowledgebase_init_context(workspace: Workspace, input_path: str | Path) -> dict[str, str]:
+    input_text = str(input_path)
+    if _is_supported_source_url(input_text):
+        try:
+            return {"input_path": input_text, "content": _download_url_as_html(input_text)}
+        except RepositoryError:
+            pdf_path = _download_url_as_temporary_pdf(input_text)
+            return {"input_path": input_text, "content": f"Captured PDF: {pdf_path}"}
+    path = _resolve_local_source_input(workspace, input_path)
+    if path.suffix.lower() == ".md":
+        return {"input_path": str(input_path), "content": path.read_text(encoding="utf-8")}
+    return {"input_path": str(input_path), "content": f"Input file: {path}"}
+
+
+def _validate_knowledgebase_init_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise RepositoryError(
+            "knowledgebase init payload must include description, tags, scope, and outline"
+        )
+    if "frontmatter" in payload and isinstance(payload["frontmatter"], dict):
+        payload = payload["frontmatter"]
+    description = payload.get("description")
+    tags = payload.get("tags", [])
+    scope = payload.get("scope")
+    outline = payload.get("outline")
+    if not isinstance(description, str) or not description.strip():
+        raise RepositoryError("knowledgebase description must be a non-empty string")
+    if not _is_string_list(tags):
+        raise RepositoryError("knowledgebase tags must be a list of strings")
+    if not isinstance(scope, dict):
+        raise RepositoryError("knowledgebase scope must be a mapping with includes/excludes")
+    if not _is_string_list(scope.get("includes")) or not _is_string_list(scope.get("excludes")):
+        raise RepositoryError("knowledgebase scope.includes and scope.excludes must be lists")
+    if not isinstance(outline, list):
+        raise RepositoryError("knowledgebase outline must be a list")
+    return {
+        "description": description.strip(),
+        "tags": tags,
+        "scope": {"includes": scope["includes"], "excludes": scope["excludes"]},
+        "outline": outline,
+    }
+
+
+def _review_approved(review: dict[str, Any] | None) -> bool:
+    return isinstance(review, dict) and review.get("decision") == "approve"
+
+
+def _source_ids_from_evidence(evidence: list[Any]) -> list[str]:
+    ids: list[str] = []
+    for item in evidence:
+        if isinstance(item, dict):
+            value = item.get("source_id") or item.get("object_id") or item.get("id")
+            if isinstance(value, str) and value not in ids:
+                ids.append(value)
+    return ids
+
+
+def _validate_reviewed_evidence_from_candidate(
+    evidence: list[dict[str, Any]],
+    candidate_frontmatter: dict[str, Any],
+) -> None:
+    candidate_keys = {
+        (
+            item.get("source_id") or item.get("object_id") or item.get("id"),
+            item.get("locator"),
+            item.get("quote") or item.get("excerpt") or item.get("snippet"),
+        )
+        for item in candidate_frontmatter.get("evidence", [])
+        if isinstance(item, dict)
+    }
+    for item in evidence:
+        key = (
+            item.get("source_id") or item.get("object_id") or item.get("id"),
+            item.get("locator"),
+            item.get("quote") or item.get("excerpt") or item.get("snippet"),
+        )
+        if key not in candidate_keys:
+            raise RepositoryError("accepted evidence must come from the candidate evidence")
+
+
+def _outline_node_ids(outline: Any) -> set[str]:
+    ids: set[str] = set()
+
+    def visit(node: Any, path: str = "") -> None:
+        if isinstance(node, dict):
+            node_id = node.get("id") or node.get("path") or path
+            if isinstance(node_id, str) and node_id.strip():
+                ids.add(node_id)
+            for key in ("children", "nodes", "items"):
+                children = node.get(key, [])
+                if not isinstance(children, list):
+                    continue
+                for index, child in enumerate(children):
+                    child_path = (
+                        f"{node_id}/{index}" if isinstance(node_id, str) else f"{path}/{index}"
+                    )
+                    visit(child, child_path)
+        elif isinstance(node, list):
+            for index, child in enumerate(node):
+                visit(child, f"{path}/{index}" if path else str(index))
+        elif isinstance(node, str) and node.strip():
+            ids.add(node)
+
+    visit(outline)
+    return ids
+
+
+def _outline_nodes_with_labels(outline: Any) -> list[tuple[str, str, str | None]]:
+    nodes: list[tuple[str, str, str | None]] = []
+
+    def visit(node: Any, parent_id: str | None = None, fallback: str = "") -> None:
+        if isinstance(node, dict):
+            node_id = node.get("id") or node.get("path") or fallback
+            title = node.get("title") or node_id
+            current_id = str(node_id)
+            if current_id:
+                nodes.append((current_id, str(title), parent_id))
+            for key in ("children", "nodes", "items"):
+                children = node.get(key)
+                if isinstance(children, list):
+                    for index, child in enumerate(children):
+                        visit(child, current_id, f"{current_id}/{index}")
+        elif isinstance(node, list):
+            for index, child in enumerate(node):
+                visit(child, parent_id, str(index))
+        elif isinstance(node, str) and node.strip():
+            nodes.append((node, node, parent_id))
+
+    visit(outline)
+    return nodes
+
+
+def _active_knowledgebase_context(repository: ObjectRepository) -> list[dict[str, Any]]:
+    records = [
+        record
+        for record in _all_records(repository)
+        if record.object_type == "knowledge-base" and record.status == "active"
+    ]
+    return [
+        {
+            "id": record.object_id,
+            "title": record.metadata.get("title"),
+            "description": record.metadata.get("description"),
+            "tags": record.metadata.get("tags", []),
+            "scope": record.metadata.get("scope", {}),
+            "outline": record.metadata.get("outline", []),
+        }
+        for record in records
+    ]
+
+
+def _validate_outline_change_suggestions(
+    repository: ObjectRepository,
+    suggestions: list[dict[str, Any]],
+) -> None:
+    for item in suggestions:
+        kb_id = item.get("kb_id")
+        if not isinstance(kb_id, str) or not kb_id.strip():
+            raise RepositoryError("outline_change_suggestions[].kb_id is required")
+        record = _find_single_object(repository, kb_id)
+        if record.object_type != "knowledge-base" or record.status != "active":
+            raise RepositoryError(
+                f"outline_change_suggestions[].kb_id must reference active knowledge-base: {kb_id}"
+            )
+        for field in ("reason", "suggested_change"):
+            if not isinstance(item.get(field), str) or not item[field].strip():
+                raise RepositoryError(f"outline_change_suggestions[].{field} is required")
 
 
 def _validate_note_input(
@@ -2743,7 +2712,6 @@ def _clean_expectations() -> dict[str, Any]:
         "note": {
             "directories": ["notes/active", "notes/deprecated"],
             "statuses": ["active", "deprecated"],
-            "removed_fields": ["bindings", "tags", "summary"],
         },
     }
 
@@ -2763,41 +2731,15 @@ def _clean_differences(
                 }
             )
 
-    for legacy_dir in ("notes/inbox", "notes/bound", "notes/archive"):
-        path = workspace.resolve(legacy_dir)
-        if path.exists():
-            differences.append(
-                {
-                    "kind": "legacy_directory",
-                    "path": legacy_dir,
-                    "expected": "notes/active or notes/deprecated",
-                    "migration": "move contained note Markdown files to notes/active unless deprecated",
-                }
-            )
-
     for record in _all_records(repository):
         _append_field_schema_differences(record, workspace, differences)
         if record.object_type != "note":
             continue
         relative_path = str(workspace.relative(record.path))
-        legacy_fields = [
-            field for field in ("bindings", "tags", "summary") if field in record.metadata
-        ]
-        if legacy_fields:
-            differences.append(
-                {
-                    "kind": "legacy_fields",
-                    "object_id": record.object_id,
-                    "object_type": "note",
-                    "path": relative_path,
-                    "fields": legacy_fields,
-                    "migration": "delete these frontmatter fields",
-                }
-            )
         if record.status not in {"active", "deprecated"}:
             differences.append(
                 {
-                    "kind": "legacy_status",
+                    "kind": "status_drift",
                     "object_id": record.object_id,
                     "object_type": "note",
                     "path": relative_path,
@@ -2911,45 +2853,36 @@ def _clean_object_schemas() -> dict[str, dict[str, set[str]]]:
         "candidate": {
             "required": object_fields
             | {
-                "source_refs",
-                "note_refs",
-                "suggested_tags",
-                "suggested_kb_ids",
+                "bindto",
+                "outline_change_suggestions",
+                "summary",
                 "evidence",
-                "relations",
                 "review",
             },
             "allowed": object_fields
             | {
-                "source_refs",
-                "note_refs",
-                "suggested_tags",
-                "suggested_kb_ids",
+                "bindto",
+                "outline_change_suggestions",
+                "summary",
                 "evidence",
-                "relations",
                 "review",
             },
         },
         "knowledge": {
             "required": object_fields
             | {
-                "tags",
-                "source_refs",
+                "summary",
                 "evidence",
-                "kb_ids",
-                "relations",
+                "bindto",
                 "deprecated_at",
                 "deprecated_reason",
             },
             "allowed": object_fields
             | review_fields
             | {
-                "tags",
-                "source_refs",
-                "note_refs",
+                "summary",
                 "evidence",
-                "kb_ids",
-                "relations",
+                "bindto",
                 "review_reason",
                 "deprecated_at",
                 "deprecated_reason",
@@ -2959,17 +2892,17 @@ def _clean_object_schemas() -> dict[str, dict[str, set[str]]]:
             "required": object_fields
             | {
                 "description",
-                "acceptance_criteria",
-                "knowledge_ids",
                 "tags",
+                "scope",
+                "outline",
             },
             "allowed": object_fields
             | review_fields
             | {
                 "description",
-                "acceptance_criteria",
-                "knowledge_ids",
                 "tags",
+                "scope",
+                "outline",
             },
         },
         "note": {
@@ -3361,7 +3294,18 @@ def _download_url_as_pdf_with_playwright(workspace: Workspace, url: str) -> Path
     target = workspace.ensure_parent(_url_capture_pdf_relative(url))
     if target.exists():
         return target
+    return _download_url_as_pdf_to_path(url, target)
 
+
+def _download_url_as_temporary_pdf(url: str) -> Path:
+    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+    target_dir = Path(tempfile.mkdtemp(prefix="kbmanager-kb-init-"))
+    target = target_dir / f"{digest}.pdf"
+    return _download_url_as_pdf_to_path(url, target)
+
+
+def _download_url_as_pdf_to_path(url: str, target: Path) -> Path:
+    target.parent.mkdir(parents=True, exist_ok=True)
     try:
         from playwright.sync_api import Error as PlaywrightError
         from playwright.sync_api import sync_playwright
@@ -3615,28 +3559,25 @@ def _write_source_records_atomic(
         raise
 
 
-def _validate_upstream_refs(
+def _validate_source_refs(
     repository: ObjectRepository,
     source_ids: list[str],
-    note_ids: list[str],
 ) -> list[ObjectRecord]:
-    if not source_ids and not note_ids:
+    if not source_ids:
         raise RepositoryError(
-            "candidate must reference at least one source or note; pass source_ids and/or "
-            "note_ids with existing object IDs"
+            "candidate must reference at least one source; pass source_ids with existing "
+            "source object IDs"
         )
 
     records: list[ObjectRecord] = []
     for source_id in source_ids:
         record = _find_single_object(repository, source_id, expected_type="source")
-        if record.status not in {"raw", "archived", "deprecated"}:
+        if record.status not in {"raw", "deprecated"}:
             raise RepositoryError(
                 f"source has unsupported status: {source_id}; candidate sources must be "
-                "raw, archived, or deprecated"
+                "raw or deprecated"
             )
         records.append(record)
-    for note_id in note_ids:
-        records.append(_find_single_object(repository, note_id, expected_type="note"))
     return records
 
 
@@ -3657,8 +3598,6 @@ def _source_deprecation_impacts(
         if record.object_id == source_id:
             continue
         fields: list[str] = []
-        if source_id in _string_items(record.metadata.get("source_refs", [])):
-            fields.append("source_refs")
         for evidence in record.metadata.get("evidence", []):
             if not isinstance(evidence, dict):
                 continue
@@ -3718,13 +3657,15 @@ def _validate_candidate_llm_result(result: dict[str, Any] | None) -> list[dict[s
     for draft in drafts:
         if not isinstance(draft, dict):
             raise RepositoryError(
-                "each candidate draft must be a mapping with title, body, evidence, refs, "
-                "and optional relations"
+                "each candidate draft must be a mapping with title, summary, content, evidence, "
+                "bindto, and outline_change_suggestions"
             )
         if not isinstance(draft.get("title"), str) or not draft["title"].strip():
             raise RepositoryError("candidate title must be a non-empty string")
-        if not isinstance(draft.get("body"), str) or not draft["body"].strip():
-            raise RepositoryError("candidate body must be a non-empty string")
+        if not isinstance(draft.get("summary"), str) or not draft["summary"].strip():
+            raise RepositoryError("candidate summary must be a non-empty string")
+        if not isinstance(draft.get("content"), str) or not draft["content"].strip():
+            raise RepositoryError("candidate content must be a non-empty string")
         if draft.get("status") in {"accepted", "knowledge"} or draft.get("type") == "knowledge":
             raise RepositoryError(
                 "LLM result must not create accepted knowledge; create type candidate with "
@@ -3733,14 +3674,15 @@ def _validate_candidate_llm_result(result: dict[str, Any] | None) -> list[dict[s
         evidence = draft.get("evidence")
         if not isinstance(evidence, list) or not evidence:
             raise RepositoryError(f"candidate evidence must be a non-empty list; {EVIDENCE_SHAPE}")
-        for key in ("source_refs", "note_refs", "suggested_tags", "suggested_kb_ids"):
+        for key in ("source_refs",):
             if key in draft and not _is_string_list(draft[key]):
                 raise RepositoryError(
                     f"candidate {key} must be a list of strings; use [] when empty"
                 )
-        if "relations" in draft and not _is_mapping_list(draft["relations"]):
-            raise RepositoryError(CANDIDATE_RELATION_SHAPE)
-        for key in ("evidence_summary", "llm_notes"):
+        for key in ("bindto", "outline_change_suggestions"):
+            if key in draft and not _is_mapping_list(draft[key]):
+                raise RepositoryError(f"candidate {key} must be a list of mappings")
+        for key in ("llm_notes",):
             if key in draft and not isinstance(draft[key], str):
                 raise RepositoryError(f"candidate {key} must be a string; omit if absent")
     return drafts
@@ -3750,7 +3692,6 @@ def _plan_candidate_records(
     repository: ObjectRepository,
     drafts: list[dict[str, Any]],
     source_ids: list[str],
-    note_ids: list[str],
 ) -> list[dict[str, Any]]:
     today = _today()
     used_ids = set(_id_paths(repository))
@@ -3773,41 +3714,30 @@ def _plan_candidate_records(
         planned_ids.add(candidate_id)
 
         draft_source_ids = draft.get("source_refs", source_ids)
-        draft_note_ids = draft.get("note_refs", note_ids)
-        if not draft_source_ids and not draft_note_ids:
+        if not draft_source_ids:
             raise RepositoryError(
-                "candidate must reference at least one source or note; source_refs/note_refs "
-                "must include the requested upstream IDs"
+                "candidate must reference at least one source; source_refs must include "
+                "the requested upstream IDs"
             )
-        if not _is_string_list(draft_source_ids) or not _is_string_list(draft_note_ids):
-            raise RepositoryError(
-                "candidate source_refs and note_refs must be string lists; use [] when empty"
-            )
+        if not _is_string_list(draft_source_ids):
+            raise RepositoryError("candidate source_refs must be a string list")
         _validate_preserved_refs(source_ids, draft_source_ids, "source_refs")
-        _validate_preserved_refs(note_ids, draft_note_ids, "note_refs")
-        _validate_upstream_refs(repository, draft_source_ids, draft_note_ids)
-        _validate_evidence(
-            repository,
-            draft["evidence"],
-            draft_source_ids,
-            draft_note_ids,
-        )
-        relations = draft.get("relations", [])
-        _validate_candidate_relations(repository, relations, self_knowledge_id=candidate_id)
-        suggested_kb_ids = draft.get("suggested_kb_ids", [])
-        _validate_candidate_suggested_kb_ids(repository, suggested_kb_ids)
+        _validate_source_refs(repository, draft_source_ids)
+        _validate_evidence(repository, draft["evidence"], draft_source_ids)
+        bindto = draft.get("bindto", [])
+        _validate_bindto(repository, bindto)
+        outline_change_suggestions = draft.get("outline_change_suggestions", [])
+        _validate_outline_change_suggestions(repository, outline_change_suggestions)
 
         frontmatter = {
             "id": candidate_id,
             "type": "candidate",
             "title": draft["title"],
             "status": "pending",
-            "source_refs": draft_source_ids,
-            "note_refs": draft_note_ids,
-            "suggested_tags": draft.get("suggested_tags", []),
-            "suggested_kb_ids": suggested_kb_ids,
+            "bindto": bindto,
+            "outline_change_suggestions": outline_change_suggestions,
+            "summary": draft["summary"],
             "evidence": draft["evidence"],
-            "relations": relations,
             "review": {
                 "reviewed_by": None,
                 "reviewed_at": None,
@@ -3822,10 +3752,9 @@ def _plan_candidate_records(
                 "id": candidate_id,
                 "frontmatter": frontmatter,
                 "body": (
-                    "\n## Candidate Knowledge\n\n"
-                    f"{draft['body'].strip()}\n\n"
-                    "## Evidence\n\n"
-                    f"{draft.get('evidence_summary', '').strip()}\n\n"
+                    "\n## Content\n\n"
+                    f"{draft['content'].strip()}\n\n"
+                    "## Supporting Material\n\n"
                     "## LLM Notes\n\n"
                     f"{draft.get('llm_notes', '').strip()}\n"
                 ),
@@ -3855,21 +3784,21 @@ def _candidate_create_response_extra(records: list[dict[str, Any]]) -> dict[str,
     candidates = [
         {
             "id": record["id"],
-            "suggested_tags": list(record["frontmatter"].get("suggested_tags", [])),
-            "suggested_kb_ids": list(record["frontmatter"].get("suggested_kb_ids", [])),
+            "bindto": list(record["frontmatter"].get("bindto", [])),
+            "outline_change_suggestions": list(
+                record["frontmatter"].get("outline_change_suggestions", [])
+            ),
         }
         for record in records
     ]
     return {
         "candidate_ids": [candidate["id"] for candidate in candidates],
-        "suggested_tags": _merged_strings(
-            [],
-            [tag for candidate in candidates for tag in candidate["suggested_tags"]],
-        ),
-        "suggested_kb_ids": _merged_strings(
-            [],
-            [kb_id for candidate in candidates for kb_id in candidate["suggested_kb_ids"]],
-        ),
+        "bindto": [binding for candidate in candidates for binding in candidate["bindto"]],
+        "outline_change_suggestions": [
+            suggestion
+            for candidate in candidates
+            for suggestion in candidate["outline_change_suggestions"]
+        ],
         "candidates": candidates,
     }
 
@@ -3891,9 +3820,8 @@ def _validate_evidence(
     repository: ObjectRepository,
     evidence: list[Any],
     source_ids: list[str],
-    note_ids: list[str],
 ) -> None:
-    upstream = set(source_ids) | set(note_ids)
+    upstream = set(source_ids)
     for item in evidence:
         if not isinstance(item, dict):
             raise RepositoryError(EVIDENCE_SHAPE)
@@ -3916,59 +3844,45 @@ def _validate_evidence(
         _find_single_object(repository, source_id)
 
 
-def _validate_candidate_relations(
+def _validate_evidence_references_sources(
     repository: ObjectRepository,
-    relations: list[dict[str, Any]],
-    *,
-    self_knowledge_id: str | None = None,
-) -> None:
-    _validate_child_of_count(relations, CANDIDATE_RELATION_SHAPE)
-    for relation in relations:
-        relation_type = relation.get("type")
-        target_id = relation.get("target")
-        _validate_relation_type(relation_type, CANDIDATE_RELATION_SHAPE)
-        if not isinstance(target_id, str) or not target_id.strip():
+    evidence: list[dict[str, Any]],
+) -> list[str]:
+    source_ids = _source_ids_from_evidence(evidence)
+    if not source_ids:
+        raise RepositoryError("evidence must reference at least one source")
+    for source_id in source_ids:
+        record = _find_single_object(repository, source_id)
+        if record.object_type != "source":
             raise RepositoryError(
-                f"{CANDIDATE_RELATION_SHAPE}; "
-                "relation.target must be an existing knowledge ID"
+                f"evidence must reference source objects only; {source_id} is "
+                f"{record.object_type}"
             )
-        if relation_type == HIERARCHY_RELATION_TYPE and target_id == self_knowledge_id:
-            raise RepositoryError("child_of relation must not target the same candidate ID")
-        target = _find_single_object(repository, target_id)
-        if target.object_type != "knowledge":
-            raise RepositoryError(
-                f"candidate relation target must be knowledge: {target_id}; "
-                "remove non-knowledge targets or replace target with an existing knowledge ID"
-            )
+    return source_ids
 
 
-def _validate_relation_type(value: Any, shape_message: str) -> None:
-    if not isinstance(value, str) or not value.strip():
-        raise RepositoryError(f"{shape_message}; relation.type must be non-empty")
-    if value not in RELATION_TYPES:
-        raise RepositoryError(
-            f"{shape_message}; relation.type must be one of: {RELATION_TYPE_LIST}"
-        )
-
-
-def _validate_child_of_count(relations: list[dict[str, Any]], shape_message: str) -> None:
-    count = sum(1 for relation in relations if relation.get("type") == HIERARCHY_RELATION_TYPE)
-    if count > 1:
-        raise RepositoryError(
-            f"{shape_message}; each knowledge object may have at most one child_of"
-        )
-
-
-def _validate_candidate_suggested_kb_ids(
+def _validate_bindto(
     repository: ObjectRepository,
-    suggested_kb_ids: list[str],
+    bindto: list[dict[str, Any]],
 ) -> None:
-    for kb_id in suggested_kb_ids:
+    for item in bindto:
+        if not isinstance(item, dict):
+            raise RepositoryError(BINDTO_SHAPE)
+        kb_id = item.get("kb_id")
+        outline_node = item.get("outline_node")
+        reason = item.get("reason")
+        if not isinstance(kb_id, str) or not kb_id.strip():
+            raise RepositoryError(f"{BINDTO_SHAPE}; kb_id is required")
+        if not isinstance(outline_node, str) or not outline_node.strip():
+            raise RepositoryError(f"{BINDTO_SHAPE}; outline_node is required")
+        if not isinstance(reason, str) or not reason.strip():
+            raise RepositoryError(f"{BINDTO_SHAPE}; reason is required")
         record = _find_single_object(repository, kb_id)
-        if record.object_type != "knowledge-base":
+        if record.object_type != "knowledge-base" or record.status != "active":
+            raise RepositoryError(f"bindto.kb_id must reference an active knowledge-base: {kb_id}")
+        if outline_node not in _outline_node_ids(record.metadata.get("outline", [])):
             raise RepositoryError(
-                f"candidate suggested_kb_id must be knowledge-base: {kb_id}; "
-                "remove it or use an existing kb-YYYYMMDD-001 ID"
+                f"bindto.outline_node does not exist in {kb_id}: {outline_node}"
             )
 
 
@@ -3977,9 +3891,8 @@ def _candidate_reference_summaries(
     frontmatter: dict[str, Any],
 ) -> list[dict[str, Any]]:
     references: list[dict[str, Any]] = []
-    for object_id in frontmatter.get("source_refs", []):
-        references.append(_summary_for_record(_find_single_object(repository, object_id)))
-    for object_id in frontmatter.get("note_refs", []):
+    evidence_source_ids = _source_ids_from_evidence(frontmatter.get("evidence", []))
+    for object_id in evidence_source_ids:
         references.append(_summary_for_record(_find_single_object(repository, object_id)))
     return references
 

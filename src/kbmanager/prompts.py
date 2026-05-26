@@ -61,16 +61,12 @@ OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
             "candidates": [
                 {
                     "title": "non-empty string",
-                    "body": "non-empty string",
+                    "summary": "non-empty string",
+                    "content": "non-empty string",
                     "source_refs": "list[string]",
-                    "note_refs": "list[string]",
                     "evidence": "list[{source_id|object_id|id, locator, quote|excerpt|snippet}]",
-                    "suggested_tags": "list[string]",
-                    "suggested_kb_ids": "list[string]",
-                    "relations": (
-                        "list[{type: agrees|conflicts|related_to|child_of, target: "
-                        "existing accepted knowledge ID}] or [] when there are no relations"
-                    ),
+                    "bindto": "list[{kb_id, outline_node, reason}] or []",
+                    "outline_change_suggestions": "list[{kb_id, reason, suggested_change}] or []",
                 }
             ]
         },
@@ -94,29 +90,28 @@ OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "candidate_review_assist": {
         "type": "object",
-        "required": ["summary", "evidence_review", "suggested_kb_ids", "recommendations"],
+        "required": ["summary", "evidence_review", "bindto", "recommendations"],
         "properties": {
             "summary": "non-empty string",
             "evidence_review": "list[object]",
-            "suggested_kb_ids": "list[string]",
+            "bindto": "list[{kb_id, outline_node, reason}]",
             "recommendations": "list[object|string]",
         },
     },
     "knowledge_merge_assist": {
         "type": "object",
-        "required": ["merged_body", "tags", "kb_ids", "relations", "evidence_review"],
+        "required": ["merged_summary", "merged_content", "evidence", "bindto", "evidence_review"],
     },
     "knowledgebase_create_draft": {
         "type": "object",
-        "required": ["frontmatter", "body"],
+        "required": ["frontmatter"],
         "properties": {
             "frontmatter": {
-                "title": "non-empty string",
                 "description": "non-empty string",
-                "acceptance_criteria": "non-empty string",
                 "tags": "list[string]",
+                "scope": "{includes: list[string], excludes: list[string]}",
+                "outline": "list[outline_node]",
             },
-            "body": "markdown string",
         },
     },
 }

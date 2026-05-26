@@ -17,6 +17,7 @@ Required payload fields:
 - `note_id`
 - `reason`
 - `decision`: `"deprecate"`
+- `reviewed_by`
 
-Do not edit or move note files directly.
+Do not edit or move note files directly. This user review confirmation must identify `reviewed_by`.
 After success, report the API's automatic `kb.index.rebuild` result. Do not run a separate rebuild from the command.

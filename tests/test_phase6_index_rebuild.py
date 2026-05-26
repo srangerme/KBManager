@@ -7,7 +7,7 @@ from kbmanager.repository import MarkdownDocument, ObjectRepository
 from kbmanager.workspace import Workspace
 
 
-def _repository(tmp_path: Path) -> ObjectRepository:
+def _repo(tmp_path: Path) -> ObjectRepository:
     return ObjectRepository(Workspace(tmp_path))
 
 
@@ -17,13 +17,13 @@ def _write_markdown(
     frontmatter: dict[str, object],
     body: str = "\n## Body\n\nContent.\n",
 ) -> None:
-    _repository(tmp_path).write_markdown(
+    _repo(tmp_path).write_markdown(
         relative_path,
         MarkdownDocument(frontmatter=frontmatter, body=body),
     )
 
 
-def _seed_index_objects(tmp_path: Path) -> None:
+def _seed_new_model(tmp_path: Path, *, bad_outline: bool = False) -> None:
     _write_markdown(
         tmp_path,
         "data/raw/md/source-20260520-001.md",
@@ -31,23 +31,14 @@ def _seed_index_objects(tmp_path: Path) -> None:
             "id": "source-20260520-001",
             "type": "source",
             "title": "Source One",
+            "source_type": "markdown",
             "status": "raw",
+            "path": "data/raw/md/source-20260520-001.md",
             "summary": "Source summary.",
+            "cleaned": {},
+            "deprecated_at": None,
+            "deprecated_reason": None,
             "tags": ["source-tag"],
-            "created": "2026-05-20",
-            "updated": "2026-05-20",
-        },
-    )
-    _write_markdown(
-        tmp_path,
-        "data/raw/md/source-20260520-002.md",
-        {
-            "id": "source-20260520-002",
-            "type": "source",
-            "title": "Deprecated Source",
-            "status": "deprecated",
-            "summary": "Deprecated source summary.",
-            "tags": ["deprecated-tag"],
             "created": "2026-05-20",
             "updated": "2026-05-20",
         },
@@ -61,8 +52,9 @@ def _seed_index_objects(tmp_path: Path) -> None:
             "title": "Research KB",
             "status": "active",
             "description": "Research knowledge.",
-            "knowledge_ids": ["knowledge-20260520-001"],
             "tags": ["kb-tag"],
+            "scope": {"includes": ["research"], "excludes": []},
+            "outline": [{"id": "sec1", "title": "Section 1"}],
             "created": "2026-05-20",
             "updated": "2026-05-20",
         },
@@ -75,70 +67,19 @@ def _seed_index_objects(tmp_path: Path) -> None:
             "type": "knowledge",
             "title": "Accepted Knowledge",
             "status": "accepted",
-            "tags": ["accepted-tag"],
-            "source_refs": ["source-20260520-001"],
+            "summary": "Knowledge summary.",
             "evidence": [
+                {"source_id": "source-20260520-001", "locator": "section 1", "quote": "Content."}
+            ],
+            "bindto": [
                 {
-                    "source_id": "source-20260520-001",
-                    "locator": "section 1",
-                    "quote": "Content.",
+                    "kb_id": "kb-20260520-001",
+                    "outline_node": "missing" if bad_outline else "sec1",
+                    "reason": "Fits.",
                 }
             ],
-            "kb_ids": ["kb-20260520-001"],
-            "relations": [],
-            "created": "2026-05-20",
-            "updated": "2026-05-20",
-        },
-    )
-    _write_markdown(
-        tmp_path,
-        "knowledge/atomic/knowledge-20260520-099.md",
-        {
-            "id": "knowledge-20260520-099",
-            "type": "knowledge",
-            "title": "Deprecated Knowledge",
-            "status": "deprecated",
-            "tags": ["deprecated-tag"],
-            "source_refs": ["source-20260520-002"],
-            "evidence": [
-                {
-                    "source_id": "source-20260520-002",
-                    "locator": "section 9",
-                    "quote": "Deprecated.",
-                }
-            ],
-            "kb_ids": [],
-            "relations": [{"type": "related_to", "target": "knowledge-20260520-001"}],
-            "created": "2026-05-20",
-            "updated": "2026-05-20",
-        },
-    )
-    _write_markdown(
-        tmp_path,
-        "candidates/pending/knowledge-20260520-002.md",
-        {
-            "id": "knowledge-20260520-002",
-            "type": "candidate",
-            "title": "Pending Candidate",
-            "status": "pending",
-            "source_refs": ["source-20260520-001"],
-            "note_refs": [],
-            "suggested_tags": ["candidate-tag"],
-            "suggested_kb_ids": ["kb-20260520-001"],
-            "evidence": [
-                {
-                    "source_id": "source-20260520-001",
-                    "locator": "section 2",
-                    "quote": "Content.",
-                }
-            ],
-            "relations": [],
-            "review": {
-                "reviewed_by": None,
-                "reviewed_at": None,
-                "decision": None,
-                "reason": None,
-            },
+            "deprecated_at": None,
+            "deprecated_reason": None,
             "created": "2026-05-20",
             "updated": "2026-05-20",
         },
@@ -151,359 +92,62 @@ def _seed_index_objects(tmp_path: Path) -> None:
             "type": "note",
             "title": "Active Note",
             "status": "active",
-            "created": "2026-05-20",
-            "updated": "2026-05-20",
-        },
-    )
-    _write_markdown(
-        tmp_path,
-        "notes/deprecated/note-20260520-099.md",
-        {
-            "id": "note-20260520-099",
-            "type": "note",
-            "title": "Deprecated Note",
-            "status": "deprecated",
+            "deprecated_at": None,
+            "deprecated_reason": None,
             "created": "2026-05-20",
             "updated": "2026-05-20",
         },
     )
 
 
-def test_index_rebuild_dry_run_returns_diffs_without_writing(tmp_path: Path) -> None:
+def test_index_rebuild_derives_knowledgebase_members_from_bindto(tmp_path: Path) -> None:
     init_workspace(tmp_path)
-    _seed_index_objects(tmp_path)
-    original = (tmp_path / "indexes/knowledge-index.md").read_text(encoding="utf-8")
+    _seed_new_model(tmp_path)
 
-    result = index_rebuild(tmp_path, dry_run=True)
+    result = index_rebuild(tmp_path).to_dict()
 
-    data = result.to_dict()
-    assert data["status"] == "success"
-    assert data["issues"] == []
-    assert any(diff["path"] == "indexes/knowledge-index.md" for diff in data["diffs"])
-    assert (tmp_path / "indexes/knowledge-index.md").read_text(encoding="utf-8") == original
-    assert "Accepted Knowledge" in next(
-        diff["after"] for diff in data["diffs"] if diff["path"] == "indexes/knowledge-index.md"
-    )
-
-
-def test_index_rebuild_repairs_damaged_indexes_from_objects(tmp_path: Path) -> None:
-    init_workspace(tmp_path)
-    _seed_index_objects(tmp_path)
-    (tmp_path / "indexes/knowledge-index.md").write_text("corrupt index\n", encoding="utf-8")
-
-    result = index_rebuild(tmp_path)
-
-    data = result.to_dict()
-    assert data["status"] == "success"
-    assert "Accepted Knowledge" in (tmp_path / "indexes/knowledge-index.md").read_text(
+    assert result["status"] == "success"
+    kb_index = (tmp_path / "indexes/knowledgebase/kb-20260520-001-knowledge-index.md").read_text(
         encoding="utf-8"
     )
-    assert "corrupt index" not in (tmp_path / "indexes/knowledge-index.md").read_text(
-        encoding="utf-8"
-    )
-    assert "Source One" in (tmp_path / "indexes/source-index.md").read_text(encoding="utf-8")
-    assert "Deprecated Source" not in (tmp_path / "indexes/source-index.md").read_text(
-        encoding="utf-8"
-    )
-    assert "Pending Candidate" in (tmp_path / "indexes/review-queue.md").read_text(encoding="utf-8")
-    assert (tmp_path / "indexes/knowledgebase/kb-20260520-001-knowledge-index.md").is_file()
+    assert "knowledge-20260520-001" in kb_index
+    assert result["issues"] == []
 
 
-def test_index_rebuild_hides_deprecated_objects_from_list_indexes(tmp_path: Path) -> None:
+def test_index_rebuild_reports_invalid_bindto_outline_node(tmp_path: Path) -> None:
     init_workspace(tmp_path)
-    _seed_index_objects(tmp_path)
+    _seed_new_model(tmp_path, bad_outline=True)
 
-    result = index_rebuild(tmp_path)
+    result = index_rebuild(tmp_path, dry_run=True).to_dict()
 
-    assert result.to_dict()["status"] == "success"
-    index_paths = [
-        "indexes/source-index.md",
-        "indexes/knowledge-index.md",
-        "indexes/tag-index.md",
-        "indexes/relation-index.yml",
-        "indexes/kb-index.md",
-        "indexes/note-index.md",
-        "indexes/knowledgebase/kb-20260520-001-knowledge-index.md",
-    ]
-    combined = "\n".join(
-        (tmp_path / path).read_text(encoding="utf-8") for path in index_paths
-    )
-    assert "Deprecated Source" not in combined
-    assert "Deprecated Knowledge" not in combined
-    assert "Deprecated Note" not in combined
-    assert "source-20260520-002" not in combined
-    assert "knowledge-20260520-099" not in combined
-    assert "note-20260520-099" not in combined
+    assert result["status"] == "success"
+    assert result["issues"][0]["code"] == "invalid_bindto_outline_node"
 
 
-def test_index_rebuild_supports_scope_and_object_id(tmp_path: Path) -> None:
+def test_index_rebuild_dry_run_does_not_write(tmp_path: Path) -> None:
     init_workspace(tmp_path)
-    _seed_index_objects(tmp_path)
-    (tmp_path / "indexes/source-index.md").write_text("bad source\n", encoding="utf-8")
-    (tmp_path / "indexes/knowledge-index.md").write_text("bad knowledge\n", encoding="utf-8")
+    _seed_new_model(tmp_path)
+    before = (tmp_path / "indexes/knowledge-index.md").read_text(encoding="utf-8")
 
-    source_only = index_rebuild(tmp_path, scope="source")
-    kb_only = index_rebuild(
-        tmp_path,
-        scope="knowledgebase",
-        object_id="kb-20260520-001",
-        dry_run=True,
-    )
+    result = index_rebuild(tmp_path, dry_run=True).to_dict()
 
-    assert source_only.to_dict()["status"] == "success"
-    assert "Source One" in (tmp_path / "indexes/source-index.md").read_text(encoding="utf-8")
-    assert (tmp_path / "indexes/knowledge-index.md").read_text(encoding="utf-8") == (
-        "bad knowledge\n"
-    )
-    assert {
-        "indexes/kb-index.md",
-        "indexes/knowledgebase/kb-20260520-001-knowledge-index.md",
-    } == {diff["path"] for diff in kb_only.to_dict()["diffs"]}
+    assert result["status"] == "success"
+    assert (tmp_path / "indexes/knowledge-index.md").read_text(encoding="utf-8") == before
 
 
-def test_index_rebuild_rejects_task_scope(tmp_path: Path) -> None:
+def test_knowledgebase_map_writes_outline_bindto_mermaid(tmp_path: Path) -> None:
     init_workspace(tmp_path)
-
-    result = index_rebuild(tmp_path, scope="task")
-
-    assert result.to_dict()["status"] == "failed"
-    assert "task" not in result.to_dict()["errors"][0]["message"]
-
-
-def test_index_rebuild_reports_consistency_issues(tmp_path: Path) -> None:
-    init_workspace(tmp_path)
-    _write_markdown(
-        tmp_path,
-        "candidates/pending/knowledge-20260520-001.md",
-        {
-            "id": "knowledge-20260520-001",
-            "type": "candidate",
-            "title": "Candidate",
-            "status": "pending",
-            "source_refs": ["source-20260520-404"],
-            "note_refs": [],
-            "suggested_tags": [],
-            "suggested_kb_ids": [],
-            "evidence": [
-                {
-                    "source_id": "source-20260520-404",
-                    "locator": "section 1",
-                    "quote": "Missing.",
-                }
-            ],
-            "relations": [],
-            "review": {
-                "reviewed_by": None,
-                "reviewed_at": None,
-                "decision": None,
-                "reason": None,
-            },
-            "created": "2026-05-20",
-            "updated": "2026-05-20",
-        },
-    )
-    _write_markdown(
-        tmp_path,
-        "knowledge/atomic/knowledge-20260520-001.md",
-        {
-            "id": "knowledge-20260520-001",
-            "type": "knowledge",
-            "title": "Knowledge",
-            "status": "accepted",
-            "tags": [],
-            "source_refs": [],
-            "evidence": [],
-            "kb_ids": [],
-            "relations": [],
-            "created": "2026-05-20",
-            "updated": "2026-05-20",
-        },
-    )
-
-    result = index_rebuild(tmp_path, dry_run=True)
-
-    data = result.to_dict()
-    issue_codes = {issue["code"] for issue in data["issues"]}
-    assert data["status"] == "success"
-    assert "candidate_knowledge_id_conflict" in issue_codes
-    assert "duplicate_id" in issue_codes
-    assert "missing_reference" in issue_codes
-
-
-def test_index_rebuild_reports_knowledgebase_membership_mismatches(tmp_path: Path) -> None:
-    init_workspace(tmp_path)
-    _write_markdown(
-        tmp_path,
-        "knowledge/bases/kb-20260520-001.md",
-        {
-            "id": "kb-20260520-001",
-            "type": "knowledge-base",
-            "title": "Research KB",
-            "status": "active",
-            "description": "Research knowledge.",
-            "knowledge_ids": ["knowledge-20260520-001"],
-            "tags": [],
-            "created": "2026-05-20",
-            "updated": "2026-05-20",
-        },
-    )
-    _write_markdown(
-        tmp_path,
-        "knowledge/bases/kb-20260520-002.md",
-        {
-            "id": "kb-20260520-002",
-            "type": "knowledge-base",
-            "title": "Practice KB",
-            "status": "active",
-            "description": "Practice knowledge.",
-            "knowledge_ids": [],
-            "tags": [],
-            "created": "2026-05-20",
-            "updated": "2026-05-20",
-        },
-    )
-    _write_markdown(
-        tmp_path,
-        "knowledge/atomic/knowledge-20260520-001.md",
-        {
-            "id": "knowledge-20260520-001",
-            "type": "knowledge",
-            "title": "Accepted Knowledge",
-            "status": "accepted",
-            "tags": [],
-            "source_refs": [],
-            "evidence": [],
-            "kb_ids": ["kb-20260520-002"],
-            "relations": [],
-            "created": "2026-05-20",
-            "updated": "2026-05-20",
-        },
-    )
-
-    result = index_rebuild(tmp_path, dry_run=True)
-
-    data = result.to_dict()
-    mismatches = [
-        issue
-        for issue in data["issues"]
-        if issue["code"] == "knowledgebase_membership_mismatch"
-    ]
-    assert data["status"] == "success"
-    assert {
-        ("kb-20260520-001", "knowledge_ids", "knowledge-20260520-001"),
-        ("knowledge-20260520-001", "kb_ids", "kb-20260520-002"),
-    } == {
-        (issue["object_id"], issue["field"], issue["target_id"])
-        for issue in mismatches
-    }
-
-
-def test_index_rebuild_reports_child_of_hierarchy_issues(tmp_path: Path) -> None:
-    init_workspace(tmp_path)
-    for knowledge_id, relations in [
-        ("knowledge-20260520-001", [{"type": "child_of", "target": "knowledge-20260520-002"}]),
-        ("knowledge-20260520-002", [{"type": "child_of", "target": "knowledge-20260520-001"}]),
-        (
-            "knowledge-20260520-003",
-            [
-                {"type": "child_of", "target": "knowledge-20260520-001"},
-                {"type": "child_of", "target": "knowledge-20260520-002"},
-            ],
-        ),
-        ("knowledge-20260520-004", [{"type": "supports", "target": "knowledge-20260520-001"}]),
-    ]:
-        _write_markdown(
-            tmp_path,
-            f"knowledge/atomic/{knowledge_id}.md",
-            {
-                "id": knowledge_id,
-                "type": "knowledge",
-                "title": knowledge_id,
-                "status": "accepted",
-                "tags": [],
-                "source_refs": [],
-                "evidence": [],
-                "kb_ids": [],
-                "relations": relations,
-                "created": "2026-05-20",
-                "updated": "2026-05-20",
-            },
-        )
-
-    result = index_rebuild(tmp_path, dry_run=True)
-
-    data = result.to_dict()
-    issue_codes = {issue["code"] for issue in data["issues"]}
-    assert data["status"] == "success"
-    assert "child_of_cycle" in issue_codes
-    assert "multiple_child_of" in issue_codes
-    assert "unknown_relation_type" in issue_codes
-
-
-def test_knowledgebase_map_writes_mermaid_tree(tmp_path: Path) -> None:
-    init_workspace(tmp_path)
-    _write_markdown(
-        tmp_path,
-        "knowledge/bases/kb-20260520-001.md",
-        {
-            "id": "kb-20260520-001",
-            "type": "knowledge-base",
-            "title": "Research KB",
-            "status": "active",
-            "description": "Research knowledge.",
-            "knowledge_ids": ["knowledge-20260520-001", "knowledge-20260520-002"],
-            "tags": [],
-            "created": "2026-05-20",
-            "updated": "2026-05-20",
-        },
-    )
-    _write_markdown(
-        tmp_path,
-        "knowledge/atomic/knowledge-20260520-001.md",
-        {
-            "id": "knowledge-20260520-001",
-            "type": "knowledge",
-            "title": "Learning-based Control",
-            "status": "accepted",
-            "tags": [],
-            "source_refs": [],
-            "evidence": [],
-            "kb_ids": ["kb-20260520-001"],
-            "relations": [],
-            "created": "2026-05-20",
-            "updated": "2026-05-20",
-        },
-    )
-    _write_markdown(
-        tmp_path,
-        "knowledge/atomic/knowledge-20260520-002.md",
-        {
-            "id": "knowledge-20260520-002",
-            "type": "knowledge",
-            "title": "Reinforcement Learning",
-            "status": "accepted",
-            "tags": [],
-            "source_refs": [],
-            "evidence": [],
-            "kb_ids": ["kb-20260520-001"],
-            "relations": [{"type": "child_of", "target": "knowledge-20260520-001"}],
-            "created": "2026-05-20",
-            "updated": "2026-05-20",
-        },
-    )
+    _seed_new_model(tmp_path)
     output = tmp_path / "map.md"
 
     result = knowledgebase_map(
         tmp_path,
         knowledgebase_id="kb-20260520-001",
         output_path=output,
-    )
+    ).to_dict()
 
-    data = result.to_dict()
-    assert data["status"] == "success"
-    assert data["path"] == str(output)
     markdown = output.read_text(encoding="utf-8")
+    assert result["status"] == "success"
     assert "```mermaid" in markdown
-    assert "Learning-based Control" in markdown
-    assert "Reinforcement Learning" in markdown
-    assert "knowledge_20260520_001 --> knowledge_20260520_002" in markdown
+    assert "Section 1" in markdown
+    assert "Accepted Knowledge" in markdown

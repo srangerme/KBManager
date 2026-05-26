@@ -11,7 +11,6 @@ plugin.
 
 ## 文档
 
-- [开发计划](docs/开发计划.md)：分阶段目标、验收标准、测试重点和里程碑。
 - [架构设计](docs/架构设计.md)：设计原则、架构分层、目录结构和 LLM 参与边界。
 - [对象](docs/对象.md)：source、candidate、knowledge、knowledge base、note、index、prompt 等对象结构。
 - [Interface](docs/Interface.md)：第一层交互接口、输入输出、slash command、LLM prompt 组装和 review 交互。

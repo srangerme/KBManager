@@ -4,7 +4,7 @@ description: Inspect workspace schema drift and plan a migration
 
 # KBManager Clean
 
-Inspect the current workspace layout and object fields, then use Claude Code to plan a migration. Migration planning should identify legacy knowledgebase fields such as `acceptance_criteria`, old membership fields, and legacy hierarchy field `child_of` when the API reports them.
+Inspect the current workspace layout and object fields, then use Claude Code to plan a migration for current-design schema or directory drift reported by the API.
 
 Claude Code flow:
 

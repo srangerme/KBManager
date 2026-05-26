@@ -684,7 +684,10 @@ def test_llm_prompt_text_renders_sections_with_priority_rules() -> None:
         }
     )
 
-    assert "Follow the `kbmanager_system_prompt` section as the highest-priority instruction" in prompt
+    assert (
+        "Follow the `kbmanager_system_prompt` section as the highest-priority instruction"
+        in prompt
+    )
     assert "Return only valid JSON" in prompt
     assert "## Section: kbmanager_system_prompt (system)" in prompt
     assert "Do not invent facts." in prompt

@@ -266,7 +266,7 @@ resume:
 - 输入：无。
 - 行为：Interface 层调用 `kb.index.rebuild`，从对象文件重建派生索引，并返回 index 更新 diff 和一致性问题；命令只做固定 API 调用和结果展示。
 - API 编排：`kb.index.rebuild()`。
-- 输出：更新的索引路径、问题列表和修复方案；问题列表应覆盖无效 `bindto`、不存在的 outline 节点、legacy `acceptance_criteria`、legacy `kb_ids` 和 legacy relation `child_of`。
+- 输出：更新的索引路径、问题列表和修复方案；问题列表应覆盖无效 `bindto` 和不存在的 outline 节点。
 - 约束：不得直接写对象文件或索引文件；索引写入只允许通过 `kb.index.rebuild`。
 
 ### `/clean`

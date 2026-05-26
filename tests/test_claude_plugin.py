@@ -40,10 +40,9 @@ COMMAND_REQUIRED_FIELDS = {
     "note-deprecate.md": ["note_id", "reason", "decision", "reviewed_by"],
     "knowledgebase-create.md": [
         "title",
-        "description",
-        "acceptance_criteria",
-        "decision",
-        "reviewed_by",
+        "input_path",
+        "review",
+        "reviewed_payload",
     ],
 }
 
@@ -52,7 +51,7 @@ COMMAND_OPTIONAL_FIELDS = {
     "source-add.md": ["title", "tags", "authors"],
     "candidate-review.md": ["candidate_id", "reason", "merge_targets"],
     "note-add.md": ["title"],
-    "knowledgebase-create.md": ["tags", "body"],
+    "knowledgebase-create.md": ["knowledgebase_id"],
     "knowledgebase-list.md": ["knowledgebase_id"],
     "knowledgebase-map.md": ["knowledgebase_id"],
 }
@@ -91,6 +90,16 @@ def test_claude_plugin_manifest_is_valid_json() -> None:
 
     assert manifest["name"] == "kbm"
     assert manifest["commands"] == "./commands/"
+    assert manifest["skills"] == "./skills/"
+
+
+def test_claude_plugin_packages_deep_research_skill() -> None:
+    skill = REPO_ROOT / "skills/knowledgebase-deep-research-prompt/SKILL.md"
+
+    text = skill.read_text(encoding="utf-8")
+    assert "name: knowledgebase-deep-research-prompt" in text
+    assert "description" in text
+    assert "original URLs" in text
 
 
 def test_register_marketplace_script_adds_current_plugin(tmp_path: Path) -> None:
@@ -339,6 +348,34 @@ def test_plugin_helper_invokes_api_with_project_dir(tmp_path: Path) -> None:
     assert not (tmp_path / "data").exists()
 
 
+def test_plugin_helper_does_not_import_kbmanager_from_project_dir(tmp_path: Path) -> None:
+    project_src = tmp_path / "src/kbmanager"
+    project_src.mkdir(parents=True)
+    (project_src / "__init__.py").write_text(
+        "raise RuntimeError('project kbmanager must not be imported')\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+    env["CLAUDE_PROJECT_DIR"] = str(tmp_path)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts/kbmanager_plugin.py"),
+            "kb.init",
+            '{"dry_run": true}',
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    result = json.loads(completed.stdout)
+    assert result["status"] == "success"
+
+
 def test_plugin_helper_rejects_unknown_operation(tmp_path: Path) -> None:
     env = os.environ.copy()
     env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
@@ -358,3 +395,10 @@ def test_plugin_helper_rejects_unknown_operation(tmp_path: Path) -> None:
 
     assert completed.returncode != 0
     assert "unsupported operation" in completed.stderr
+
+
+def test_knowledgebase_map_command_omits_empty_knowledgebase_id() -> None:
+    text = (COMMAND_DIR / "knowledgebase-map.md").read_text(encoding="utf-8")
+
+    assert "kb.knowledgebase.map '{}' --pretty" in text
+    assert 'do not pass an empty string' in text

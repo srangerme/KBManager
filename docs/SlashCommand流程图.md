@@ -14,8 +14,8 @@
 | Slash command | 结论 | 说明 |
 | --- | --- | --- |
 | `/candidate review [candidate-id]` | 修改 | 展示 evidence、`bindto` 和 outline 修改建议；accept/merge 的 reviewed payload 包含 evidence，不自动改 outline。 |
-| `/check` | 修改 | 展示 `bindto`、outline 节点和 legacy 字段一致性问题。 |
-| `/clean` | 修改 | 特许迁移命令；完整计划经用户整批确认后才允许直接改对象文件，迁移计划需要覆盖 legacy `acceptance_criteria`、`kb_ids`、`child_of`。 |
+| `/check` | 修改 | 展示 `bindto` 和 outline 节点一致性问题。 |
+| `/clean` | 修改 | 特许迁移命令；完整计划经用户整批确认后才允许直接改新设计内的 schema 或目录 drift。 |
 | `/init` | 不改主流程 | 初始化流程不受模型变化影响。 |
 | `/knowledgebase create <path-or-url>` | 修改 | 创建最小 knowledgebase 后立即从 source-like input 生成 create 阶段字段，但不创建 source。 |
 | `/knowledgebase list` | 字段同步 | 只读流程不变，展示内容随索引包含 `scope/outline`。 |
@@ -62,7 +62,7 @@ flowchart TD
 flowchart TD
   A["(user) 输入命令"] --> B["(interface) 调用索引重建"]
   B --> C["(api) kb.index.rebuild"]
-  C --> D["(interface) 展示更新的索引路径、bindto/outline 问题、legacy 字段问题和修复方案"]
+  C --> D["(interface) 展示更新的索引路径、bindto/outline 问题和修复方案"]
 ```
 
 ## 3. `/clean`
@@ -73,7 +73,7 @@ flowchart TD
   B --> C["(api) kb.clean.inspect"]
   C --> D{"(api) 是否存在迁移差异"}
   D -- 否 --> E["(interface) 展示无需迁移"]
-  D -- 是 --> F["(LLM) 生成迁移计划，覆盖 legacy acceptance_criteria、kb_ids、child_of"]
+  D -- 是 --> F["(LLM) 生成当前新设计内的 schema 或目录 drift 迁移计划"]
   F --> G["(user) 整批确认"]
   G --> H["(interface) /clean 特许迁移执行：确认后直接修改文件并调用 kb.index.rebuild"]
 ```

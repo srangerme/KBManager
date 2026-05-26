@@ -12,6 +12,14 @@ Use `$ARGUMENTS` as an optional `knowledgebase_id`. This command is read-only.
 
 Call `kb.knowledgebase.map` through the plugin helper:
 
+If `$ARGUMENTS` is empty:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT:-.}/scripts/kbmanager_plugin.py" kb.knowledgebase.map '{}' --pretty
+```
+
+If `$ARGUMENTS` contains a knowledgebase ID:
+
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT:-.}/scripts/kbmanager_plugin.py" kb.knowledgebase.map "{\"knowledgebase_id\": \"${ARGUMENTS}\"}" --pretty
 ```

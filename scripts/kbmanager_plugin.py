@@ -18,13 +18,10 @@ from typing import Any
 
 def _bootstrap_import_path() -> None:
     plugin_root = Path(os.environ.get("CLAUDE_PLUGIN_ROOT", Path(__file__).resolve().parents[1]))
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR")
     candidates = [
         plugin_root / "src",
         plugin_root / "python",
     ]
-    if project_dir:
-        candidates.append(Path(project_dir) / "src")
     for candidate in candidates:
         if candidate.is_dir():
             sys.path.insert(0, str(candidate.resolve()))
@@ -47,6 +44,7 @@ def _operation_map() -> dict[str, Callable[..., Any]]:
         "kb.knowledge.merge": application.knowledge_merge,
         "kb.knowledge.deprecate": application.knowledge_deprecate,
         "kb.knowledgebase.create": application.knowledgebase_create,
+        "kb.knowledgebase.init": application.knowledgebase_init,
         "kb.knowledgebase.map": application.knowledgebase_map,
         "kb.note.add": application.note_add,
         "kb.note.get": application.note_get,
