@@ -487,13 +487,13 @@ def test_note_add_without_content_requests_markdown_in_claude_without_api_call()
         {
             "kind": "note_markdown",
             "action": "add_note",
-            "instructions": "Reply with note Markdown content and optional title, tags, and bindings.",
+            "instructions": "Reply with note Markdown content and an optional title.",
         }
     ]
     assert api.calls == []
 
 
-def test_note_add_with_content_always_uses_llm_title_summary_flow() -> None:
+def test_note_add_with_content_always_uses_llm_title_flow() -> None:
     api = MockApi(
         {
             "kb.note.add": [
@@ -502,7 +502,7 @@ def test_note_add_with_content_always_uses_llm_title_summary_flow() -> None:
             ]
         }
     )
-    llm = MockLlm({"note_title_summary": {"title": "LLM Note", "summary": "Summary."}})
+    llm = MockLlm({"note_title": {"title": "LLM Note"}})
     interface = SlashCommandInterface(api=api, llm=llm)
 
     result = interface.kb_note_add(content="Only body.")
@@ -514,8 +514,6 @@ def test_note_add_with_content_always_uses_llm_title_summary_flow() -> None:
             {
                 "content": "Only body.",
                 "title": None,
-                "tags": None,
-                "bindings": None,
                 "needs_llm": True,
             },
         ),
@@ -524,18 +522,16 @@ def test_note_add_with_content_always_uses_llm_title_summary_flow() -> None:
             {
                 "content": "Only body.",
                 "title": None,
-                "tags": None,
-                "bindings": None,
                 "needs_llm": True,
                 "resume_token": "note-token",
-                "llm_result": {"title": "LLM Note", "summary": "Summary."},
+                "llm_result": {"title": "LLM Note"},
             },
         ),
     ]
-    assert llm.calls[0]["purpose"] == "note_title_summary"
+    assert llm.calls[0]["purpose"] == "note_title"
 
 
-def test_note_add_with_user_title_still_uses_llm_summary_flow() -> None:
+def test_note_add_with_user_title_still_uses_llm_title_flow() -> None:
     api = MockApi(
         {
             "kb.note.add": [
@@ -544,7 +540,7 @@ def test_note_add_with_user_title_still_uses_llm_summary_flow() -> None:
             ]
         }
     )
-    llm = MockLlm({"note_title_summary": {"title": "LLM Note", "summary": "Summary."}})
+    llm = MockLlm({"note_title": {"title": "LLM Note"}})
     interface = SlashCommandInterface(api=api, llm=llm)
 
     result = interface.kb_note_add(content="Only body.", title="User Title")
@@ -564,7 +560,7 @@ def test_note_view_displays_note_payload_in_claude() -> None:
                     "kb.note.get",
                     note={
                         "id": "note-20260520-001",
-                        "path": "notes/inbox/note-20260520-001.md",
+                        "path": "notes/active/note-20260520-001.md",
                         "body": "Note body.",
                     },
                 )
@@ -580,7 +576,7 @@ def test_note_view_displays_note_payload_in_claude() -> None:
     assert data["opened_in_vscode"] == []
     assert data["displayed_in_claude"] == [
         {
-            "path": "notes/inbox/note-20260520-001.md",
+            "path": "notes/active/note-20260520-001.md",
             "format": "markdown",
             "content": "Note body.",
         }

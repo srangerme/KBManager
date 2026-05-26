@@ -407,7 +407,7 @@ class JobProcessor:
     def _process_command(self, block: MessageBlock) -> JobResult:
         try:
             if block.kind == "help":
-                return JobResult(success=True, message=_help_text())
+                return JobResult(success=True, message=_help_card(), markdown=True)
             if block.kind == "list":
                 return JobResult(
                     success=True,
@@ -423,7 +423,7 @@ class JobProcessor:
                     raise ValueError("ask question is empty")
                 return JobResult(
                     success=True,
-                    message=self.ask_llm.complete(question),
+                    message=_ask_card(question, self.ask_llm.complete(question)),
                     markdown=True,
                 )
         except Exception as exc:
@@ -451,7 +451,8 @@ class JobProcessor:
             )
         _raise_if_not_success(first, "note add")
         note = first.get("note") or {}
-        title = _string(note.get("title")) or _string(first.get("summary")) or "Add note"
+        frontmatter = note.get("frontmatter") if isinstance(note.get("frontmatter"), dict) else {}
+        title = _string(frontmatter.get("title")) or _string(note.get("title")) or "Add note"
         note_id = _string(first.get("note_id")) or _string(note.get("id"))
         return JobResult(
             success=True,
@@ -591,6 +592,8 @@ class Worker:
                 ids = f"：{', '.join(result.object_ids)}" if result.object_ids else ""
                 stash = f"\n已保留 stash：{result.stash_ref}" if result.stash_ref else ""
                 text = f"{prefix} 已添加{ids}{stash}"
+            elif block.kind == "ask":
+                text = result.message
             else:
                 text = f"{prefix}\n{result.message}" if include_prefix else result.message
             self.replies.reply_markdown(block.message_id, block.chat_id, text)
@@ -668,18 +671,132 @@ ask <question>
 其他文本默认按 source 导入；以 note 开头的文本按 note 添加。"""
 
 
+def _help_card() -> str:
+    return (
+        "# KBManager Help\n\n"
+        "- **help**: 显示这份帮助。\n"
+        "- **view <id>**: 查看对象摘要并发送原始文件。支持 note-*、knowledge-*、kb-*、source-*。\n"
+        "- **list kb**: 列出 knowledge base。\n"
+        "- **list <kb-id>**: 列出指定 knowledge base 下的 knowledge，例如 list kb-20260525-001。\n"
+        "- **list note**: 列出 note。\n"
+        "- **ask <question>**: 让 Claude Code 基于当前用户侧 git 工作区回答问题。\n\n"
+        "其他文本默认按 source 导入；以 note 开头的文本按 note 添加。\n"
+    )
+
+
+def _ask_card(question: str, answer: str) -> str:
+    return f"# KBManager Ask\n\n**Question**: {question.strip()}\n\n{answer.strip()}\n"
+
+
 def _list_text(root: Path, target: str) -> str:
     item = target.strip()
     if not item:
         raise ValueError("list requires a target: kb, <kb-id>, or note")
     folded = item.casefold()
+    workspace = Workspace(root)
     if folded == "kb":
-        return _read_workspace_text(root, "indexes/kb-index.md")
+        return _lark_list_text(workspace, "kb", _read_workspace_text(root, "indexes/kb-index.md"))
     if folded == "note":
-        return _read_workspace_text(root, "indexes/note-index.md")
+        return _lark_list_text(
+            workspace,
+            "note",
+            _read_workspace_text(root, "indexes/note-index.md"),
+        )
     if item.startswith("kb-"):
-        return _read_workspace_text(root, f"indexes/knowledgebase/{item}-knowledge-index.md")
+        return _lark_list_text(
+            workspace,
+            "knowledge",
+            _read_workspace_text(root, f"indexes/knowledgebase/{item}-knowledge-index.md")
+        )
     raise ValueError("list target must be kb, note, or a kb-* ID")
+
+
+def _lark_list_text(workspace: Workspace, list_kind: str, markdown: str) -> str:
+    table = _first_markdown_table(markdown)
+    if table is None:
+        return markdown
+    title = _markdown_title(markdown)
+    headers, rows = table
+    rendered = [f"# {title}" if title else "# List", "", f"共 {len(rows)} 条", ""]
+    rendered.extend(_rows_to_card_bullets(workspace, list_kind, headers, rows))
+    return "\n".join(rendered).rstrip() + "\n"
+
+
+def _first_markdown_table(markdown: str) -> tuple[list[str], list[list[str]]] | None:
+    lines = markdown.splitlines()
+    for index in range(len(lines)):
+        if not _is_markdown_table_start(lines, index):
+            continue
+        table_lines: list[str] = []
+        while index < len(lines) and _is_markdown_table_row(lines[index]):
+            table_lines.append(lines[index])
+            index += 1
+        rows = [_table_cells(line) for line in table_lines]
+        if len(rows) >= 2:
+            return rows[0], rows[2:]
+    return None
+
+
+def _rows_to_card_bullets(
+    workspace: Workspace,
+    list_kind: str,
+    headers: list[str],
+    rows: list[list[str]],
+) -> list[str]:
+    if not headers:
+        return []
+    id_index = 0
+    title_index = _column_index(headers, "Title")
+    status_index = _column_index(headers, "Status")
+    path_index = _column_index(headers, "Path")
+    rendered: list[str] = []
+    for row_index, row in enumerate(rows, start=1):
+        object_id = _row_value(row, id_index) or f"Row {row_index}"
+        title = _row_value(row, title_index) or object_id
+        status = _row_value(row, status_index)
+        path = _row_value(row, path_index)
+        extra = _list_extra(workspace, list_kind, path)
+        label = f"{title}({object_id}，{status})" if status else f"{title}({object_id})"
+        if extra:
+            rendered.append(f"- {label}，{extra}")
+        else:
+            rendered.append(f"- {label}")
+    return rendered
+
+
+def _list_extra(workspace: Workspace, list_kind: str, relative_path: str) -> str:
+    if list_kind == "kb" or not relative_path:
+        return ""
+    path = workspace.resolve(relative_path)
+    if not path.is_file() or path.suffix.lower() != ".md":
+        return ""
+    try:
+        document = ObjectRepository.parse_markdown(
+            path.read_text(encoding="utf-8"),
+            source=str(path),
+        )
+    except Exception:
+        LOGGER.exception("failed to read list extra path=%s", path)
+        return ""
+    if list_kind == "note":
+        return _one_line_text(document.body)
+    if list_kind == "knowledge":
+        return _one_line_text(document.frontmatter.get("summary"))
+    return ""
+
+
+def _column_index(headers: list[str], name: str) -> int | None:
+    folded = name.casefold()
+    for index, header in enumerate(headers):
+        if header.casefold() == folded:
+            return index
+    return None
+
+
+def _row_value(row: list[str], index: int | None) -> str:
+    if index is None or index >= len(row):
+        return ""
+    return row[index].strip()
 
 
 def _view_object(root: Path, object_id: str) -> tuple[str, tuple[Path, ...]]:
@@ -692,17 +809,89 @@ def _view_object(root: Path, object_id: str) -> tuple[str, tuple[Path, ...]]:
     if record.object_type not in {"note", "knowledge", "knowledge-base", "source"}:
         raise ValueError(f"view does not support object type: {record.object_type}")
     if record.path.suffix.lower() == ".md":
-        return record.path.read_text(encoding="utf-8"), ()
+        return _markdown_view_card(workspace, record), (record.path,)
     resource_path = _resource_for_meta_path(record.path)
-    metadata_text = yaml.safe_dump(record.metadata, sort_keys=False, allow_unicode=True).rstrip()
-    text = (
-        f"# {record.object_id}\n\n"
-        f"Source file: {workspace.relative(resource_path)}\n\n"
-        "```yaml\n"
-        f"{metadata_text}\n"
-        "```"
-    )
+    text = _metadata_view_card(workspace, record, resource_path)
     return text, (resource_path,)
+
+
+def _markdown_view_card(workspace: Workspace, record: application.ObjectRecord) -> str:
+    text = record.path.read_text(encoding="utf-8")
+    document = ObjectRepository.parse_markdown(text, source=str(record.path))
+    metadata = document.frontmatter
+    lines = [
+        f"# {_string(metadata.get('title')) or record.object_id}",
+        "",
+        f"- ID: {record.object_id}",
+        f"- Type: {record.object_type}",
+        f"- Status: {_string(metadata.get('status'))}",
+        f"- Path: {workspace.relative(record.path)}",
+    ]
+    lines.extend(_metadata_detail_lines(record.object_type, metadata))
+    preview = _preview_text(document.body)
+    if preview:
+        lines.extend(["", "## Preview", "", preview])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _metadata_view_card(
+    workspace: Workspace,
+    record: application.ObjectRecord,
+    resource_path: Path,
+) -> str:
+    metadata = record.metadata
+    lines = [
+        f"# {_string(metadata.get('title')) or record.object_id}",
+        "",
+        f"- ID: {record.object_id}",
+        f"- Type: {record.object_type}",
+        f"- Status: {_string(metadata.get('status'))}",
+        f"- Source file: {workspace.relative(resource_path)}",
+        f"- Metadata path: {workspace.relative(record.path)}",
+    ]
+    lines.extend(_metadata_detail_lines(record.object_type, metadata))
+    summary = "" if record.object_type == "note" else _one_line_text(metadata.get("summary"))
+    if summary:
+        lines.extend(["", "## Summary", "", summary])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _metadata_detail_lines(object_type: str, metadata: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    fields = [
+        ("tags", "Tags"),
+        ("kb_ids", "Knowledge Bases"),
+        ("source_refs", "Sources"),
+    ]
+    for key, label in fields:
+        value = _metadata_value_text(metadata.get(key))
+        if value:
+            lines.append(f"- {label}: {value}")
+    return lines
+
+
+def _metadata_value_text(value: Any) -> str:
+    if isinstance(value, list):
+        items = [_one_line_text(item) for item in value]
+        return ", ".join(item for item in items if item)
+    return _one_line_text(value)
+
+
+def _preview_text(value: Any, *, limit: int = 800) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "\n\n...(完整内容见附件)"
+
+
+def _one_line_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        return ", ".join(
+            f"{key}: {_one_line_text(item)}" for key, item in value.items() if _one_line_text(item)
+        )
+    return re.sub(r"\s+", " ", str(value)).strip()
 
 
 def _read_workspace_text(root: Path, relative_path: str) -> str:

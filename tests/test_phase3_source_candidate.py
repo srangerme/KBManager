@@ -75,6 +75,33 @@ def _create_source(tmp_path: Path) -> str:
     return resumed.to_dict()["source"]["id"]
 
 
+def _write_accepted_knowledge(
+    tmp_path: Path,
+    knowledge_id: str = "knowledge-20260520-900",
+    title: str = "Existing Knowledge",
+) -> str:
+    ObjectRepository(Workspace(tmp_path)).write_markdown(
+        f"knowledge/atomic/{knowledge_id}.md",
+        MarkdownDocument(
+            frontmatter={
+                "id": knowledge_id,
+                "type": "knowledge",
+                "title": title,
+                "status": "accepted",
+                "tags": [],
+                "source_refs": [],
+                "evidence": [],
+                "kb_ids": [],
+                "relations": [],
+                "created": "2026-05-20",
+                "updated": "2026-05-20",
+            },
+            body="\n## Knowledge\n\nExisting.\n",
+        ),
+    )
+    return knowledge_id
+
+
 def test_source_add_needs_llm_does_not_write(tmp_path: Path) -> None:
     init_workspace(tmp_path)
     (tmp_path / "incoming.md").write_text("# Raw\n", encoding="utf-8")
@@ -550,7 +577,7 @@ def test_candidate_create_rejects_relation_target_that_is_not_knowledge(
     source_id = _create_source(tmp_path)
     token = candidate_create(tmp_path, source_ids=[source_id]).to_dict()["resume"]["token"]
     bad_result = _candidate_llm_result(source_id)
-    bad_result["candidates"][0]["relations"] = [{"type": "supports", "target": source_id}]
+    bad_result["candidates"][0]["relations"] = [{"type": "agrees", "target": source_id}]
 
     result = candidate_create(
         tmp_path,
@@ -565,13 +592,83 @@ def test_candidate_create_rejects_relation_target_that_is_not_knowledge(
     assert _non_placeholder_names(tmp_path / "candidates/pending") == []
 
 
+def test_candidate_create_accepts_allowed_relation_types(tmp_path: Path) -> None:
+    source_id = _create_source(tmp_path)
+    target_id = _write_accepted_knowledge(tmp_path)
+    token = candidate_create(tmp_path, source_ids=[source_id]).to_dict()["resume"]["token"]
+    llm_result = _candidate_llm_result(source_id)
+    llm_result["candidates"][0]["relations"] = [
+        {"type": "agrees", "target": target_id},
+        {"type": "conflicts", "target": target_id},
+        {"type": "related_to", "target": target_id},
+        {"type": "child_of", "target": target_id},
+    ]
+
+    result = candidate_create(
+        tmp_path,
+        source_ids=[source_id],
+        resume_token=token,
+        llm_result=llm_result,
+    )
+
+    data = result.to_dict()
+    assert data["status"] == "success"
+    document = ObjectRepository(Workspace(tmp_path)).read_markdown(
+        "candidates/pending/knowledge-20260520-001.md"
+    )
+    assert document.frontmatter["relations"] == llm_result["candidates"][0]["relations"]
+
+
+def test_candidate_create_rejects_unknown_relation_type(tmp_path: Path) -> None:
+    source_id = _create_source(tmp_path)
+    target_id = _write_accepted_knowledge(tmp_path)
+    token = candidate_create(tmp_path, source_ids=[source_id]).to_dict()["resume"]["token"]
+    bad_result = _candidate_llm_result(source_id)
+    bad_result["candidates"][0]["relations"] = [{"type": "supports", "target": target_id}]
+
+    result = candidate_create(
+        tmp_path,
+        source_ids=[source_id],
+        resume_token=token,
+        llm_result=bad_result,
+    )
+
+    data = result.to_dict()
+    assert data["status"] == "failed"
+    assert "relation.type must be one of" in data["errors"][0]["message"]
+    assert "agrees" in data["errors"][0]["message"]
+
+
+def test_candidate_create_rejects_multiple_child_of_relations(tmp_path: Path) -> None:
+    source_id = _create_source(tmp_path)
+    parent_one = _write_accepted_knowledge(tmp_path, "knowledge-20260520-900", "Parent One")
+    parent_two = _write_accepted_knowledge(tmp_path, "knowledge-20260520-901", "Parent Two")
+    token = candidate_create(tmp_path, source_ids=[source_id]).to_dict()["resume"]["token"]
+    bad_result = _candidate_llm_result(source_id)
+    bad_result["candidates"][0]["relations"] = [
+        {"type": "child_of", "target": parent_one},
+        {"type": "child_of", "target": parent_two},
+    ]
+
+    result = candidate_create(
+        tmp_path,
+        source_ids=[source_id],
+        resume_token=token,
+        llm_result=bad_result,
+    )
+
+    data = result.to_dict()
+    assert data["status"] == "failed"
+    assert "at most one child_of" in data["errors"][0]["message"]
+
+
 def test_candidate_create_relation_target_error_explains_expected_shape(
     tmp_path: Path,
 ) -> None:
     source_id = _create_source(tmp_path)
     token = candidate_create(tmp_path, source_ids=[source_id]).to_dict()["resume"]["token"]
     bad_result = _candidate_llm_result(source_id)
-    bad_result["candidates"][0]["relations"] = [{"type": "supports"}]
+    bad_result["candidates"][0]["relations"] = [{"type": "agrees"}]
 
     result = candidate_create(
         tmp_path,

@@ -52,6 +52,6 @@ Hard rules:
 - A blocked URL download is handled inside the API. If the API reports failure, report its `data/failed` path and next actions to the user; do not attempt another acquisition method.
 - Candidate facts must include evidence references.
 - Candidate evidence items must include an upstream object ID, a non-empty locator, and a non-empty `quote`, `excerpt`, or `snippet`.
-- Candidate `relations` must be `[]` when there is no relation to an existing accepted knowledge object. Never emit relation placeholders like `{"type": "...", "target": ""}`; when present, `target` must be an existing `knowledge-...` ID.
+- Candidate `relations` must be `[]` when there is no relation to an existing accepted knowledge object. Never emit relation placeholders like `{"type": "...", "target": ""}`; when present, `type` must be one of `agrees`, `conflicts`, `related_to`, or `child_of`, and `target` must be an existing `knowledge-...` ID. Use only `child_of` for hierarchy.
 - Do not create accepted knowledge; candidates remain pending until user review.
 - Do not run a separate index rebuild from the command. Object-write APIs automatically call `kb.index.rebuild` after successful writes.

@@ -65,7 +65,7 @@ Hard rules:
 
 - Never accept, reject, defer, or merge without explicit user decision.
 - For `accept` and `merge`, never call the write API until the user has replied in Claude Code with approval or reviewed content.
-- Reviewed `relations` must be `[]` when there are no relations. When present, each item must include non-empty `type` and `target`, and `target` must be an existing `knowledge-...` ID.
+- Reviewed `relations` must be `[]` when there are no relations. When present, each item must include non-empty `type` and `target`; `type` must be one of `agrees`, `conflicts`, `related_to`, or `child_of`, and `target` must be an existing `knowledge-...` ID. Use only `child_of` for hierarchy.
 - Never edit candidate or knowledge files directly.
 - Never use index content as a fact source.
 - After a successful status change, report the API's automatic `kb.index.rebuild` result. Do not run a separate rebuild from the command.

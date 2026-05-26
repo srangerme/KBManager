@@ -33,11 +33,10 @@ class ObjectPaths:
     def knowledgebase(self, filename: str) -> Path:
         return self._resolve_file("knowledge/bases", filename, ".md")
 
-    def note(self, filename: str, status: str = "inbox") -> Path:
-        if status not in {"inbox", "bound", "deprecated", "archived"}:
+    def note(self, filename: str, status: str = "active") -> Path:
+        if status not in {"active", "deprecated"}:
             raise RepositoryError(f"unsupported note status: {status}")
-        directory_status = "archive" if status == "archived" else status
-        return self._resolve_file(f"notes/{directory_status}", filename, ".md")
+        return self._resolve_file(f"notes/{status}", filename, ".md")
 
     def index(self, filename: str) -> Path:
         suffix = Path(filename).suffix.lower()

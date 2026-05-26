@@ -27,9 +27,11 @@ commands are invoked as:
 ```txt
 /kbm:candidate-review [candidate-id]
 /kbm:check
+/kbm:clean
 /kbm:init
 /kbm:knowledgebase-create
 /kbm:knowledgebase-list [knowledgebase-id]
+/kbm:knowledgebase-map [knowledgebase-id]
 /kbm:lark-server-start
 /kbm:lark-server-status
 /kbm:lark-server-stop
@@ -184,7 +186,10 @@ Use a user-level setting rather than committing project-local personal
 permissions. This only allows Claude Code to run the KBManager plugin helper; it
 does not bypass KBManager review gates. Commands that return `needs_review`,
 request reviewed content in Claude Code, or require explicit confirmation must
-still pause for the user decision before calling write APIs.
+still pause for the user decision before calling write APIs. `/kbm:clean` is
+the only migration command that may directly edit workspace files, and only
+after showing the generated migration plan and receiving explicit user
+confirmation.
 
 ## Versioning
 

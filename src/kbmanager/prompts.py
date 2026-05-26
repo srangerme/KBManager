@@ -18,7 +18,8 @@ PROMPT_BY_PURPOSE = {
     "source_ingest": "source-ingest",
     "source_ingest_prompt_rewrite": "source-ingest-prompt-rewrite",
     "create_candidate": "candidate-create",
-    "note_title_summary": "note-title-summary",
+    "note_title": "note-title",
+    "clean_migration_plan": "clean-migration-plan",
     "candidate_review_assist": "candidate-review-assist",
     "knowledge_merge_assist": "knowledge-merge-assist",
     "knowledgebase_create": "knowledgebase-create",
@@ -67,17 +68,29 @@ OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
                     "suggested_tags": "list[string]",
                     "suggested_kb_ids": "list[string]",
                     "relations": (
-                        "list[{type: non-empty string, target: existing accepted "
-                        "knowledge ID}] or [] when there are no relations"
+                        "list[{type: agrees|conflicts|related_to|child_of, target: "
+                        "existing accepted knowledge ID}] or [] when there are no relations"
                     ),
                 }
             ]
         },
     },
-    "note_title_summary": {
+    "note_title": {
         "type": "object",
         "required": ["title"],
-        "properties": {"title": "non-empty string", "summary": "string|null"},
+        "properties": {"title": "non-empty string"},
+    },
+    "clean_migration_plan": {
+        "type": "object",
+        "required": ["summary", "moves", "field_deletions", "field_updates", "risks"],
+        "properties": {
+            "summary": "non-empty string",
+            "moves": "list[{from, to, reason}]",
+            "field_deletions": "list[{path, fields, reason}]",
+            "field_updates": "list[{path, field, from, to, reason}]",
+            "risks": "list[string]",
+            "execution_order": "list[string]",
+        },
     },
     "candidate_review_assist": {
         "type": "object",

@@ -47,10 +47,12 @@ def _operation_map() -> dict[str, Callable[..., Any]]:
         "kb.knowledge.merge": application.knowledge_merge,
         "kb.knowledge.deprecate": application.knowledge_deprecate,
         "kb.knowledgebase.create": application.knowledgebase_create,
+        "kb.knowledgebase.map": application.knowledgebase_map,
         "kb.note.add": application.note_add,
         "kb.note.get": application.note_get,
         "kb.note.deprecate": application.note_deprecate,
         "kb.index.rebuild": application.index_rebuild,
+        "kb.clean.inspect": application.clean_inspect,
     }
 
 

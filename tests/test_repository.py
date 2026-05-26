@@ -322,9 +322,9 @@ def test_scans_workspace_and_finds_duplicate_ids(
         ),
     )
     repository.write_markdown(
-        "notes/inbox/note.md",
+        "notes/active/note.md",
         MarkdownDocument(
-            frontmatter={**metadata("note-1", "note"), "status": "inbox"},
+            frontmatter={**metadata("note-1", "note"), "status": "active"},
             body="note\n",
         ),
     )

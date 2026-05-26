@@ -110,7 +110,8 @@ prompt 由以下部分组成：
 - `candidate-create.md`：在 `kb.candidate.create` 中生成 candidate 草案。
 - `candidate-review-assist.md`：在 `/candidate review` 中生成只读 review 辅助说明。
 - `knowledge-merge-assist.md`：在 `/candidate review` 的 merge 分支中生成合并草案和关系建议。
-- `note-title-summary.md`：为 note 生成标题和摘要。
+- `note-title.md`：为 note 生成标题。
+- `clean-migration-plan.md`：为 `/clean` 根据工作区差异生成迁移计划。
 - `knowledgebase-create.md`：根据用户提供的名称、描述、准入规则和标签生成 knowledgebase 草案。
 
 组装顺序：
@@ -215,6 +216,13 @@ resume:
 - API 编排：无。Interface 层只读打开用户工作区中的派生 index；若索引不存在或过期，则提示运行 `/kbm:check`。
 - 输出：展示的 index 路径和 Markdown 内容。
 
+### `/knowledgebase map [knowledgebase-id]`
+
+- 输入：可选 knowledgebase ID。
+- 行为：生成 Mermaid 格式的 knowledge 层级图，写入临时 Markdown 文件，并用 VSCode 打开。
+- API 编排：`kb.knowledgebase.map`。
+- 输出：临时 Markdown 路径；如果 VSCode 不可用，则在 Claude Code 中展示路径和 Markdown 内容。
+
 ### `/note add`
 
 - 输入：无命令参数。
@@ -250,6 +258,14 @@ resume:
 - API 编排：`kb.index.rebuild()`。
 - 输出：更新的索引路径、问题列表和修复方案。
 - 约束：不得直接写对象文件或索引文件；索引写入只允许通过 `kb.index.rebuild`。
+
+### `/clean`
+
+- 输入：无。
+- 行为：Interface 层调用 `kb.clean.inspect` 只读扫描工作区差异；存在差异时接管 `needs_llm`，生成迁移计划。
+- API 编排：`kb.clean.inspect()`；用户确认迁移执行后调用 `kb.index.rebuild()`。
+- 输出：迁移计划、风险、执行结果和重建索引结果。
+- 约束：只有 `/clean` 在展示完整计划并获得用户整批确认后，才允许 Claude Code 直接修改对象文件；其他命令仍必须通过 API 写入。
 
 ## 7. Review 交互
 

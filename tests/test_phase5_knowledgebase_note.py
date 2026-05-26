@@ -6,6 +6,7 @@ from pathlib import Path
 from kbmanager.application import (
     init_workspace,
     knowledgebase_create,
+    clean_inspect,
     note_add,
     note_deprecate,
     note_get,
@@ -152,12 +153,11 @@ def test_note_add_get_and_deprecate_moves_without_deleting(tmp_path: Path) -> No
     added = note_add(
         tmp_path,
         note_id="note-20260520-001",
-        title="Inbox Note",
+        title="Active Note",
         content="Remember this.",
-        tags=["inbox"],
     )
     assert added.to_dict()["status"] == "success"
-    assert (tmp_path / "notes/inbox/note-20260520-001.md").is_file()
+    assert (tmp_path / "notes/active/note-20260520-001.md").is_file()
 
     fetched = note_get(tmp_path, note_id="note-20260520-001")
     gate = note_deprecate(tmp_path, note_id="note-20260520-001", reason="No longer needed.")
@@ -169,10 +169,10 @@ def test_note_add_get_and_deprecate_moves_without_deleting(tmp_path: Path) -> No
         reviewed_by="user",
     )
 
-    assert fetched.to_dict()["note"]["frontmatter"]["status"] == "inbox"
+    assert fetched.to_dict()["note"]["frontmatter"]["status"] == "active"
     assert gate.to_dict()["status"] == "needs_review"
     assert deprecated.to_dict()["status"] == "success"
-    assert not (tmp_path / "notes/inbox/note-20260520-001.md").exists()
+    assert not (tmp_path / "notes/active/note-20260520-001.md").exists()
     deprecated_file = tmp_path / "notes/deprecated/note-20260520-001.md"
     assert deprecated_file.is_file()
     document = ObjectRepository(Workspace(tmp_path)).read_markdown(
@@ -185,27 +185,27 @@ def test_note_add_get_and_deprecate_moves_without_deleting(tmp_path: Path) -> No
     assert TIMESTAMP_RE.match(document.frontmatter["deprecated_at"])
 
 
-def test_note_add_with_binding_uses_bound_directory(tmp_path: Path) -> None:
+def test_note_add_writes_active_schema_without_removed_fields(tmp_path: Path) -> None:
     init_workspace(tmp_path)
-    source_id = _write_source(tmp_path)
 
     result = note_add(
         tmp_path,
         note_id="note-20260520-001",
-        content="Bound note.",
-        bindings=[{"type": "source", "id": source_id}],
+        content="Active note.",
     )
 
     data = result.to_dict()
     assert data["status"] == "success"
-    assert data["note"]["frontmatter"]["status"] == "bound"
-    assert data["note"]["frontmatter"]["bindings"] == [{"type": "source", "id": source_id}]
+    assert data["note"]["frontmatter"]["status"] == "active"
+    assert "bindings" not in data["note"]["frontmatter"]
+    assert "tags" not in data["note"]["frontmatter"]
+    assert "summary" not in data["note"]["frontmatter"]
     assert TIMESTAMP_RE.match(data["note"]["frontmatter"]["created"])
     assert TIMESTAMP_RE.match(data["note"]["frontmatter"]["updated"])
-    assert (tmp_path / "notes/bound/note-20260520-001.md").is_file()
+    assert (tmp_path / "notes/active/note-20260520-001.md").is_file()
 
 
-def test_note_add_optional_llm_title_summary_flow(tmp_path: Path) -> None:
+def test_note_add_optional_llm_title_flow(tmp_path: Path) -> None:
     init_workspace(tmp_path)
 
     gate = note_add(
@@ -221,29 +221,98 @@ def test_note_add_optional_llm_title_summary_flow(tmp_path: Path) -> None:
         content="Raw note body.",
         needs_llm=True,
         resume_token=token,
-        llm_result={"title": "LLM Note", "summary": "Short summary."},
+        llm_result={"title": "LLM Note"},
     )
 
     data = result.to_dict()
     assert gate.to_dict()["status"] == "needs_llm"
     assert data["status"] == "success"
     assert data["note"]["frontmatter"]["title"] == "LLM Note"
-    assert data["note"]["frontmatter"]["summary"] == "Short summary."
+    assert "summary" not in data["note"]["frontmatter"]
 
 
-def test_note_add_rejects_missing_binding_object(tmp_path: Path) -> None:
+def test_clean_inspect_reports_legacy_note_migration(tmp_path: Path) -> None:
     init_workspace(tmp_path)
-
-    result = note_add(
-        tmp_path,
-        note_id="note-20260520-001",
-        content="Bound note.",
-        bindings=[{"type": "source", "id": "source-20260520-999"}],
+    ObjectRepository(Workspace(tmp_path)).write_markdown(
+        "notes/inbox/note-20260520-001.md",
+        MarkdownDocument(
+            frontmatter={
+                "id": "note-20260520-001",
+                "type": "note",
+                "title": "Legacy note",
+                "status": "inbox",
+                "bindings": [],
+                "tags": ["legacy"],
+                "summary": "Legacy summary.",
+                "created": "2026-05-20",
+                "updated": "2026-05-20",
+            },
+            body="\n## Note\n\nBody\n",
+        ),
     )
 
-    assert result.to_dict()["status"] == "failed"
-    assert "object not found" in result.to_dict()["errors"][0]["message"]
-    assert not (tmp_path / "notes/bound/note-20260520-001.md").exists()
+    data = clean_inspect(tmp_path).to_dict()
+    assert data["status"] == "needs_llm"
+    differences = data["llm_request"]["prompt"]["sections"][1]["content"]["differences"]
+    assert any(diff["kind"] == "legacy_fields" for diff in differences)
+    assert any(diff["kind"] == "legacy_status" for diff in differences)
+    assert any(diff["kind"] == "path_migration" for diff in differences)
+
+
+def test_clean_inspect_reports_field_schema_drift_for_all_object_types(
+    tmp_path: Path,
+) -> None:
+    init_workspace(tmp_path)
+    repository = ObjectRepository(Workspace(tmp_path))
+    for relative_path, object_id, object_type, status in [
+        ("data/raw/md/source-20260520-001.md", "source-20260520-001", "source", "raw"),
+        (
+            "candidates/pending/knowledge-20260520-001.md",
+            "knowledge-20260520-001",
+            "candidate",
+            "pending",
+        ),
+        (
+            "knowledge/atomic/knowledge-20260520-002.md",
+            "knowledge-20260520-002",
+            "knowledge",
+            "accepted",
+        ),
+        (
+            "knowledge/bases/kb-20260520-001.md",
+            "kb-20260520-001",
+            "knowledge-base",
+            "active",
+        ),
+    ]:
+        repository.write_markdown(
+            relative_path,
+            MarkdownDocument(
+                frontmatter={
+                    "id": object_id,
+                    "type": object_type,
+                    "title": object_id,
+                    "status": status,
+                    "legacy_field": True,
+                    "created": "2026-05-20",
+                    "updated": "2026-05-20",
+                },
+                body="\n## Body\n\nBody\n",
+            ),
+        )
+
+    data = clean_inspect(tmp_path).to_dict()
+    differences = data["llm_request"]["prompt"]["sections"][1]["content"]["differences"]
+    missing_types = {
+        diff["object_type"] for diff in differences if diff["kind"] == "missing_fields"
+    }
+    unexpected_types = {
+        diff["object_type"] for diff in differences if diff["kind"] == "unexpected_fields"
+    }
+
+    assert data["status"] == "needs_llm"
+    assert {"source", "candidate", "knowledge", "knowledge-base"} <= missing_types
+    assert {"source", "candidate", "knowledge", "knowledge-base"} <= unexpected_types
 
 
 def test_note_deprecate_requires_reason_after_review(tmp_path: Path) -> None:
@@ -259,4 +328,4 @@ def test_note_deprecate_requires_reason_after_review(tmp_path: Path) -> None:
 
     assert result.to_dict()["status"] == "failed"
     assert "requires a non-empty reason" in result.to_dict()["errors"][0]["message"]
-    assert (tmp_path / "notes/inbox/note-20260520-001.md").is_file()
+    assert (tmp_path / "notes/active/note-20260520-001.md").is_file()

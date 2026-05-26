@@ -560,7 +560,7 @@ def test_claude_cli_runs_in_workspace_with_bypass_permissions(
     monkeypatch.setattr(lark_server.subprocess, "run", run)
 
     result = lark_server.ClaudeCliLlm(tmp_path).complete(
-        {"id": "llm-1", "purpose": "note_title_summary", "prompt": {"sections": []}}
+        {"id": "llm-1", "purpose": "note_title", "prompt": {"sections": []}}
     )
 
     assert result == {"title": "Generated", "summary": "Done"}
@@ -579,7 +579,7 @@ def test_claude_cli_runs_in_workspace_with_bypass_permissions(
     debug_file = Path(captured["command"][captured["command"].index("--debug-file") + 1])
     assert debug_file.parent == tmp_path / ".lark/logs/claude"
     assert debug_file.name.startswith("20")
-    assert "note_title_summary" in debug_file.name
+    assert "note_title" in debug_file.name
     assert "llm-1" in debug_file.name
     assert debug_file.parent.is_dir()
 
@@ -732,6 +732,7 @@ def test_worker_replies_to_help_synchronously(tmp_path: Path) -> None:
     assert job_id
     assert replies.texts == []
     assert len(replies.markdowns) == 1
+    assert replies.markdowns[0].startswith("# KBManager Help")
     assert "view <id>" in replies.markdowns[0]
     assert replies.files == []
     assert worker.jobs.empty()
@@ -740,14 +741,38 @@ def test_worker_replies_to_help_synchronously(tmp_path: Path) -> None:
 def test_worker_replies_to_list_with_markdown(tmp_path: Path) -> None:
     index = tmp_path / "indexes/note-index.md"
     index.parent.mkdir(parents=True)
-    index.write_text("# Note Index\n\n| ID | Title |\n| --- | --- |\n", encoding="utf-8")
+    index.write_text(
+        "# Note Index\n\n"
+        "| ID | Title | Status | Path |\n"
+        "| --- | --- | --- | --- |\n"
+        "| note-20260525-001 | First note | active | notes/active/note-20260525-001.md |\n",
+        encoding="utf-8",
+    )
+    note = tmp_path / "notes/active/note-20260525-001.md"
+    note.parent.mkdir(parents=True)
+    note.write_text(
+        "---\n"
+        "id: note-20260525-001\n"
+        "type: note\n"
+        "title: First note\n"
+        "status: active\n"
+        "created: 2026-05-25T00:00:00\n"
+        "updated: 2026-05-25T00:00:00\n"
+        "---\n"
+        "Remember this note.\n",
+        encoding="utf-8",
+    )
     replies = RecordingReplies()
     worker = lark_server.Worker(lark_server.JobProcessor(tmp_path), replies)
 
     worker.submit(lark_server.MessageBlock("list", "chat", "user", "m1", "note"))
 
     assert replies.texts == []
-    assert replies.markdowns == ["# Note Index\n\n| ID | Title |\n| --- | --- |\n"]
+    assert replies.markdowns == [
+        "# Note Index\n\n"
+        "共 1 条\n\n"
+            "- First note(note-20260525-001，active)，Remember this note.\n"
+    ]
 
 
 def test_worker_queues_ask_with_specific_ack(tmp_path: Path) -> None:
@@ -778,34 +803,95 @@ def test_worker_replies_to_completed_ask_with_markdown(tmp_path: Path) -> None:
 
     assert replies.markdowns == [
         f"ask [{job.job_id}] 已收到，正在生成回答",
-        f"ask [{job.job_id}]\n# Answer\n\n- item",
+        "# KBManager Ask\n\n**Question**: Question?\n\n# Answer\n\n- item\n",
     ]
 
 
 def test_list_command_reads_expected_indexes(tmp_path: Path) -> None:
     kb_index = tmp_path / "indexes/kb-index.md"
     kb_index.parent.mkdir(parents=True)
-    kb_index.write_text("# KBs\n", encoding="utf-8")
+    kb_index.write_text(
+        "# KBs\n\n"
+        "| ID | Title | Status | Knowledge Count | Tags | Path |\n"
+        "| --- | --- | --- | --- | --- | --- |\n"
+        "| kb-20260525-001 | Research | active | 2 | ai | knowledgebases/kb-20260525-001.md |\n",
+        encoding="utf-8",
+    )
     kb_detail = tmp_path / "indexes/knowledgebase/kb-20260525-001-knowledge-index.md"
     kb_detail.parent.mkdir(parents=True)
-    kb_detail.write_text("# KB Detail\n", encoding="utf-8")
+    kb_detail.write_text(
+        "# KB Detail\n\n"
+        "| ID | Title | Status | Tags | Path |\n"
+        "| --- | --- | --- | --- | --- |\n"
+        "| knowledge-20260525-001 | Fact | accepted | ai | knowledge/accepted/fact.md |\n",
+        encoding="utf-8",
+    )
+    knowledge = tmp_path / "knowledge/accepted/fact.md"
+    knowledge.parent.mkdir(parents=True)
+    knowledge.write_text(
+        "---\n"
+        "id: knowledge-20260525-001\n"
+        "type: knowledge\n"
+        "title: Fact\n"
+        "status: accepted\n"
+        "summary: Useful fact summary.\n"
+        "created: 2026-05-25T00:00:00\n"
+        "updated: 2026-05-25T00:00:00\n"
+        "---\n"
+        "## Knowledge\n"
+        "Body\n",
+        encoding="utf-8",
+    )
     note_index = tmp_path / "indexes/note-index.md"
-    note_index.write_text("# Notes\n", encoding="utf-8")
+    note_index.write_text(
+        "# Notes\n\n"
+        "| ID | Title | Status | Path |\n"
+        "| --- | --- | --- | --- |\n"
+        "| note-20260525-001 | First note | active | notes/active/note.md |\n",
+        encoding="utf-8",
+    )
+    note = tmp_path / "notes/active/note.md"
+    note.parent.mkdir(parents=True)
+    note.write_text(
+        "---\n"
+        "id: note-20260525-001\n"
+        "type: note\n"
+        "title: First note\n"
+        "status: active\n"
+        "created: 2026-05-25T00:00:00\n"
+        "updated: 2026-05-25T00:00:00\n"
+        "---\n"
+        "First line.\n"
+        "Second line.\n",
+        encoding="utf-8",
+    )
 
-    assert lark_server._list_text(tmp_path, "kb") == "# KBs\n"
-    assert lark_server._list_text(tmp_path, "kb-20260525-001") == "# KB Detail\n"
-    assert lark_server._list_text(tmp_path, "note") == "# Notes\n"
+    assert lark_server._list_text(tmp_path, "kb") == (
+        "# KBs\n\n"
+        "共 1 条\n\n"
+        "- Research(kb-20260525-001，active)\n"
+    )
+    assert lark_server._list_text(tmp_path, "kb-20260525-001") == (
+        "# KB Detail\n\n"
+        "共 1 条\n\n"
+        "- Fact(knowledge-20260525-001，accepted)，Useful fact summary.\n"
+    )
+    assert lark_server._list_text(tmp_path, "note") == (
+        "# Notes\n\n"
+        "共 1 条\n\n"
+        "- First note(note-20260525-001，active)，First line. Second line.\n"
+    )
 
 
-def test_view_markdown_object_returns_full_markdown(tmp_path: Path) -> None:
-    note = tmp_path / "notes/inbox/note-20260525-001.md"
+def test_view_markdown_object_returns_summary_card_and_file(tmp_path: Path) -> None:
+    note = tmp_path / "notes/active/note-20260525-001.md"
     note.parent.mkdir(parents=True)
     text = (
         "---\n"
         "id: note-20260525-001\n"
         "type: note\n"
         "title: Note\n"
-        "status: inbox\n"
+        "status: active\n"
         "created: 2026-05-25T00:00:00\n"
         "updated: 2026-05-25T00:00:00\n"
         "---\n"
@@ -816,8 +902,13 @@ def test_view_markdown_object_returns_full_markdown(tmp_path: Path) -> None:
 
     result, files = lark_server._view_object(tmp_path, "note-20260525-001")
 
-    assert result == text
-    assert files == ()
+    assert result.startswith("# Note\n")
+    assert "ID: note-20260525-001" in result
+    assert "Path: notes/active/note-20260525-001.md" in result
+    assert "## Preview" in result
+    assert "Body" in result
+    assert "---" not in result
+    assert files == (note,)
 
 
 def test_view_pdf_source_returns_metadata_and_file(tmp_path: Path) -> None:
@@ -839,8 +930,10 @@ def test_view_pdf_source_returns_metadata_and_file(tmp_path: Path) -> None:
 
     result, files = lark_server._view_object(tmp_path, "source-20260525-001")
 
+    assert result.startswith("# PDF\n")
     assert "source-20260525-001" in result
     assert "data/raw/pdf/source-20260525-001.pdf" in result
+    assert "Metadata path:" in result
     assert files == (pdf,)
 
 

@@ -7,6 +7,7 @@ import importlib.resources
 import json
 import os
 import re
+import time
 import tempfile
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -36,10 +37,15 @@ KNOWLEDGE_REJECT_OPERATION = "kb.knowledge.reject"
 KNOWLEDGE_MERGE_OPERATION = "kb.knowledge.merge"
 KNOWLEDGE_DEPRECATE_OPERATION = "kb.knowledge.deprecate"
 KNOWLEDGEBASE_CREATE_OPERATION = "kb.knowledgebase.create"
+KNOWLEDGEBASE_MAP_OPERATION = "kb.knowledgebase.map"
 NOTE_ADD_OPERATION = "kb.note.add"
 NOTE_GET_OPERATION = "kb.note.get"
 NOTE_DEPRECATE_OPERATION = "kb.note.deprecate"
 INDEX_REBUILD_OPERATION = "kb.index.rebuild"
+CLEAN_INSPECT_OPERATION = "kb.clean.inspect"
+RELATION_TYPES = frozenset({"agrees", "conflicts", "related_to", "child_of"})
+HIERARCHY_RELATION_TYPE = "child_of"
+RELATION_TYPE_LIST = ", ".join(sorted(RELATION_TYPES))
 
 INIT_DIRECTORIES = (
     ".lark/logs",
@@ -55,10 +61,8 @@ INIT_DIRECTORIES = (
     "candidates/deferred",
     "knowledge/atomic",
     "knowledge/bases",
-    "notes/inbox",
-    "notes/bound",
+    "notes/active",
     "notes/deprecated",
-    "notes/archive",
     "indexes/knowledgebase",
 )
 INIT_DIRECTORY_PLACEHOLDER = "KBM.ignore"
@@ -173,7 +177,6 @@ SUPPORTED_SOURCE_SUFFIXES = {".md", ".pdf"}
 SUPPORTED_SOURCE_URL_SCHEMES = {"http", "https"}
 MAX_URL_DOWNLOAD_BYTES = 5 * 1024 * 1024
 ID_RE = re.compile(r"^[a-z]+-\d{8}-\d{3}(?:-[^\W_]+(?:-[^\W_]+)*)?$")
-NOTE_BINDING_TYPES = {"source", "candidate", "knowledge", "knowledge-base"}
 INDEX_SCOPES = {
     "all",
     "source",
@@ -196,13 +199,13 @@ INDEX_MARKDOWN_PATHS = (
 INDEX_YAML_PATHS = ("indexes/relation-index.yml",)
 CANDIDATE_RELATION_SHAPE = (
     "candidate relations must be [] when there are no relations, or mappings like "
-    "{'type': 'related_to', 'target': 'knowledge-YYYYMMDD-001'} where target is an "
-    "existing accepted knowledge ID"
+    "{'type': 'related_to', 'target': 'knowledge-YYYYMMDD-001'} where type is one of "
+    f"{RELATION_TYPE_LIST} and target is an existing accepted knowledge ID"
 )
 REVIEW_RELATION_SHAPE = (
     "reviewed relations must be [] when there are no relations, or mappings like "
-    "{'type': 'related_to', 'target': 'knowledge-YYYYMMDD-001'} where target is an "
-    "existing knowledge ID"
+    "{'type': 'related_to', 'target': 'knowledge-YYYYMMDD-001'} where type is one of "
+    f"{RELATION_TYPE_LIST} and target is an existing knowledge ID"
 )
 EVIDENCE_SHAPE = (
     "evidence items must be mappings like {'source_id': '<requested-source-or-note-id>', "
@@ -1116,20 +1119,54 @@ def knowledgebase_create(
     )
 
 
+def knowledgebase_map(
+    root: str | Path = ".",
+    *,
+    knowledgebase_id: str | None = None,
+    output_path: str | Path | None = None,
+) -> ApiResult:
+    """Generate a temporary Mermaid knowledge hierarchy map."""
+
+    try:
+        workspace = Workspace(root)
+        repository = ObjectRepository(workspace)
+        records = _all_records(repository)
+        markdown, issues = _knowledgebase_map_markdown(records, workspace, knowledgebase_id)
+        target = Path(output_path) if output_path is not None else _temporary_map_path()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(markdown, encoding="utf-8")
+    except (KBManagerError, OSError) as exc:
+        return _failed(
+            KNOWLEDGEBASE_MAP_OPERATION,
+            "knowledgebase_map_failed",
+            str(exc),
+            "Provide an existing knowledgebase ID or omit it to map all accepted knowledge.",
+        )
+
+    return ApiResult.success(
+        KNOWLEDGEBASE_MAP_OPERATION,
+        warnings=_issue_warnings(issues),
+        extra={
+            "path": str(target),
+            "markdown": markdown,
+            "issues": issues,
+            "knowledgebase_id": knowledgebase_id,
+        },
+    )
+
+
 def note_add(
     root: str | Path = ".",
     *,
     content: str,
     title: str | None = None,
-    tags: list[str] | None = None,
-    bindings: list[dict[str, Any]] | None = None,
     note_id: str | None = None,
     needs_llm: bool = False,
     resume_token: str | None = None,
     llm_result: dict[str, Any] | None = None,
     dry_run: bool = False,
 ) -> ApiResult:
-    """Add a note to inbox or bound notes when bindings are provided."""
+    """Add an active note."""
 
     try:
         llm_note: dict[str, Any] = {}
@@ -1140,27 +1177,22 @@ def note_add(
             repository,
             content=content,
             title=title,
-            tags=tags,
-            bindings=bindings,
             note_id=note_id,
         )
         token_payload = {
             "content": content,
             "title": title,
-            "tags": tags or [],
-            "bindings": bindings or [],
             "note_id": note_id,
         }
         if needs_llm and resume_token is None:
             return _needs_llm(
                 NOTE_ADD_OPERATION,
-                purpose="note_title_summary",
-                system_prompt="note-title-summary",
+                purpose="note_title",
+                system_prompt="note-title",
                 required_context=["note.content"],
-                output_schema="note_title_summary",
+                output_schema="note_title",
                 constraints=[
                     "title_required",
-                    "summary_optional",
                     "must_not_change_note_content",
                 ],
                 token_payload=token_payload,
@@ -1172,8 +1204,7 @@ def note_add(
             title = title or llm_note["title"]
         today = _today()
         new_note_id = note_id or _next_id(repository, "note")
-        note_bindings = bindings or []
-        status = "bound" if note_bindings else "inbox"
+        status = "active"
         relative_path = f"notes/{status}/{new_note_id}.md"
         if workspace.resolve(relative_path).exists():
             raise RepositoryError(f"note path already exists: {relative_path}")
@@ -1185,13 +1216,6 @@ def note_add(
             "type": "note",
             "title": note_title,
             "status": status,
-            "bindings": note_bindings,
-            "tags": tags or [],
-            "summary": (
-                llm_note["summary"]
-                if resume_token is not None and isinstance(llm_note.get("summary"), str)
-                else None
-            ),
             "deprecated_at": None,
             "deprecated_reason": None,
             "created": today,
@@ -1215,7 +1239,7 @@ def note_add(
             NOTE_ADD_OPERATION,
             "note_add_failed",
             str(exc),
-            "Provide note content and existing object bindings.",
+            "Provide non-empty note content.",
         )
 
     return _success_with_index_rebuild(
@@ -1274,6 +1298,7 @@ def note_deprecate(
         document = repository.read_markdown(source_relative)
         today = _today()
         frontmatter = dict(document.frontmatter)
+        _clean_note_frontmatter(frontmatter)
         frontmatter.update(
             {
                 "status": "deprecated",
@@ -1322,6 +1347,61 @@ def note_deprecate(
         objects=ObjectChanges(deprecated=[deprecated_relative]),
         diffs=diffs,
         extra={"note_id": note_id, "path": deprecated_relative},
+    )
+
+
+def clean_inspect(root: str | Path = ".") -> ApiResult:
+    """Inspect workspace drift from the current object layout and schema."""
+
+    try:
+        workspace = Workspace(root)
+        repository = ObjectRepository(workspace)
+        differences = _clean_differences(workspace, repository)
+    except (KBManagerError, OSError) as exc:
+        return _failed(
+            CLEAN_INSPECT_OPERATION,
+            "clean_inspect_failed",
+            str(exc),
+            "Fix unreadable object files, then inspect again.",
+        )
+
+    if not differences:
+        return ApiResult.success(
+            CLEAN_INSPECT_OPERATION,
+            extra={"differences": [], "migration_required": False},
+            next_actions=["No migration plan is needed."],
+        )
+
+    result = _needs_llm(
+        CLEAN_INSPECT_OPERATION,
+        purpose="clean_migration_plan",
+        system_prompt="clean-migration-plan",
+        required_context=["clean.differences"],
+        output_schema="clean_migration_plan",
+        constraints=[
+            "plan_only",
+            "user_confirmation_required_before_file_changes",
+            "clean_command_may_edit_files_after_confirmation",
+        ],
+        token_payload={
+            "differences": differences,
+            "current_version_expectations": _clean_expectations(),
+        },
+        warnings=_clean_warnings(differences),
+    )
+    extra = dict(result.extra)
+    extra["differences"] = differences
+    extra["migration_required"] = True
+    return ApiResult(
+        status=result.status,
+        operation=result.operation,
+        objects=result.objects,
+        diffs=result.diffs,
+        warnings=result.warnings,
+        errors=result.errors,
+        review=result.review,
+        next_actions=result.next_actions,
+        extra=extra,
     )
 
 
@@ -1400,6 +1480,111 @@ def _build_index_files(records: list[ObjectRecord], workspace: Workspace) -> dic
     return indexes
 
 
+def _knowledgebase_map_markdown(
+    records: list[ObjectRecord],
+    workspace: Workspace,
+    knowledgebase_id: str | None,
+) -> tuple[str, list[dict[str, str]]]:
+    visible_records = _without_deprecated(records)
+    knowledge = [
+        record
+        for record in _records_by_type(visible_records, "knowledge")
+        if record.status == "accepted"
+    ]
+    if knowledgebase_id is not None:
+        knowledgebases = _records_by_type(visible_records, "knowledge-base")
+        kb_record = next(
+            (record for record in knowledgebases if record.object_id == knowledgebase_id),
+            None,
+        )
+        if kb_record is None:
+            raise RepositoryError(f"knowledgebase not found: {knowledgebase_id}")
+        knowledge_ids = set(_knowledge_ids_for_base(kb_record, knowledge))
+        knowledge = [record for record in knowledge if record.object_id in knowledge_ids]
+
+    issues = _knowledge_hierarchy_issues(knowledge, workspace)
+    by_id = {record.object_id: record for record in knowledge}
+    children: dict[str, list[ObjectRecord]] = {record.object_id: [] for record in knowledge}
+    roots: list[ObjectRecord] = []
+    for record in knowledge:
+        parent_id = _child_of_target(record)
+        if parent_id and parent_id in by_id:
+            children[parent_id].append(record)
+        else:
+            roots.append(record)
+
+    for siblings in children.values():
+        siblings.sort(key=_record_sort_key)
+    roots.sort(key=_record_sort_key)
+
+    title = "Knowledgebase Map"
+    if knowledgebase_id is not None:
+        title = f"Knowledgebase Map: {knowledgebase_id}"
+    lines = [
+        f"# {title}",
+        "",
+        "```mermaid",
+        "flowchart TD",
+    ]
+    if not knowledge:
+        lines.append('  empty["No accepted knowledge"]')
+    else:
+        for record in sorted(knowledge, key=_record_sort_key):
+            lines.append(f"  {_mermaid_node_id(record.object_id)}[\"{_mermaid_label(record)}\"]")
+        edges = _mermaid_tree_edges(roots, children)
+        if edges:
+            lines.append("")
+            lines.extend(edges)
+    lines.extend(["```", ""])
+    if issues:
+        lines.extend(["## Issues", ""])
+        for issue in issues:
+            lines.append(f"- `{issue['object_id']}`: {issue['message']}")
+        lines.append("")
+    return "\n".join(lines), issues
+
+
+def _mermaid_tree_edges(
+    roots: list[ObjectRecord],
+    children: dict[str, list[ObjectRecord]],
+) -> list[str]:
+    edges: list[str] = []
+    visited: set[str] = set()
+
+    def walk(record: ObjectRecord) -> None:
+        if record.object_id in visited:
+            return
+        visited.add(record.object_id)
+        for child in children.get(record.object_id, []):
+            edges.append(
+                f"  {_mermaid_node_id(record.object_id)} --> {_mermaid_node_id(child.object_id)}"
+            )
+            walk(child)
+
+    for root in roots:
+        walk(root)
+    return edges
+
+
+def _record_sort_key(record: ObjectRecord) -> tuple[str, str]:
+    return (_metadata_text(record, "title").casefold(), record.object_id)
+
+
+def _mermaid_node_id(object_id: str) -> str:
+    return re.sub(r"[^0-9A-Za-z_]", "_", object_id)
+
+
+def _mermaid_label(record: ObjectRecord) -> str:
+    title = escape(_metadata_text(record, "title") or record.object_id, quote=True)
+    object_id = escape(record.object_id, quote=True)
+    return f"{title}<br/><code>{object_id}</code>"
+
+
+def _temporary_map_path() -> Path:
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    return Path(tempfile.gettempdir()) / f"kbmanager-knowledgebase-map-{stamp}.md"
+
+
 def _validate_index_scope(scope: str) -> None:
     if scope not in INDEX_SCOPES:
         raise RepositoryError("index scope must be one of: " + ", ".join(sorted(INDEX_SCOPES)))
@@ -1427,7 +1612,7 @@ def _filter_index_files(
             "indexes/relation-index.yml",
         },
         "knowledgebase": {"indexes/kb-index.md"},
-        "note": {"indexes/note-index.md", "indexes/tag-index.md"},
+        "note": {"indexes/note-index.md"},
         "relation": {"indexes/relation-index.yml"},
         "review_queue": {"indexes/review-queue.md"},
         "tag": {"indexes/tag-index.md"},
@@ -1503,8 +1688,9 @@ def _knowledge_index(records: list[ObjectRecord], workspace: Workspace) -> str:
 def _tag_index(records: list[ObjectRecord]) -> str:
     by_tag: dict[str, list[str]] = {}
     for record in records:
-        for tag in _string_items(record.metadata.get("tags", [])):
-            by_tag.setdefault(tag, []).append(record.object_id)
+        if record.object_type != "note":
+            for tag in _string_items(record.metadata.get("tags", [])):
+                by_tag.setdefault(tag, []).append(record.object_id)
         for tag in _string_items(record.metadata.get("suggested_tags", [])):
             by_tag.setdefault(tag, []).append(record.object_id)
     lines = ["# Tag Index", "", "| Tag | Objects |", "| --- | --- |"]
@@ -1563,8 +1749,8 @@ def _note_index(records: list[ObjectRecord], workspace: Workspace) -> str:
     lines = [
         "# Note Index",
         "",
-        "| ID | Title | Status | Bindings | Path |",
-        "| --- | --- | --- | --- | --- |",
+        "| ID | Title | Status | Path |",
+        "| --- | --- | --- | --- |",
     ]
     for record in records:
         lines.append(
@@ -1572,8 +1758,7 @@ def _note_index(records: list[ObjectRecord], workspace: Workspace) -> str:
                 [
                     record.object_id,
                     _metadata_text(record, "title"),
-                    record.status,
-                    _format_bindings(record.metadata.get("bindings", [])),
+                    _note_status(record.status),
                     str(workspace.relative(record.path)),
                 ]
             )
@@ -1728,6 +1913,7 @@ def _consistency_issues(records: list[ObjectRecord], workspace: Workspace) -> li
     for record in records:
         _append_reference_issues(record, by_id, issues)
     _append_knowledgebase_membership_issues(records, issues)
+    _append_relation_consistency_issues(records, by_id, workspace, issues)
     return issues
 
 
@@ -1772,20 +1958,148 @@ def _append_reference_issues(
         if isinstance(target_id, str):
             _append_missing_reference_issue(record, "evidence", target_id, by_id, issues)
 
-    for binding in record.metadata.get("bindings", []):
-        if not isinstance(binding, dict):
-            continue
-        binding_type = binding.get("type")
-        target_id = binding.get("id")
-        if isinstance(binding_type, str) and isinstance(target_id, str):
-            _append_missing_or_type_issue(
-                record,
-                "bindings",
-                target_id,
-                binding_type,
-                by_id,
-                issues,
+
+def _append_relation_consistency_issues(
+    records: list[ObjectRecord],
+    by_id: dict[str, list[ObjectRecord]],
+    workspace: Workspace,
+    issues: list[dict[str, str]],
+) -> None:
+    for record in records:
+        child_of_count = 0
+        for relation in record.metadata.get("relations", []):
+            if not isinstance(relation, dict):
+                issues.append(
+                    {
+                        "code": "invalid_relation_shape",
+                        "object_id": record.object_id,
+                        "message": "relation entries must be mappings with type and target",
+                        "path": str(workspace.relative(record.path)),
+                    }
+                )
+                continue
+            relation_type = relation.get("type")
+            target_id = relation.get("target")
+            if relation_type not in RELATION_TYPES:
+                issues.append(
+                    {
+                        "code": "unknown_relation_type",
+                        "object_id": record.object_id,
+                        "message": (
+                            f"unknown relation type: {relation_type}; expected one of "
+                            f"{RELATION_TYPE_LIST}"
+                        ),
+                        "path": str(workspace.relative(record.path)),
+                    }
+                )
+            if relation_type == HIERARCHY_RELATION_TYPE:
+                child_of_count += 1
+                if target_id == record.object_id:
+                    issues.append(
+                        {
+                            "code": "child_of_self",
+                            "object_id": record.object_id,
+                            "field": "relations",
+                            "target_id": str(target_id),
+                            "message": f"{record.object_id} child_of points to itself",
+                        }
+                    )
+                elif isinstance(target_id, str):
+                    matches = by_id.get(target_id, [])
+                    if not matches:
+                        issues.append(
+                            {
+                                "code": "child_of_missing_target",
+                                "object_id": record.object_id,
+                                "field": "relations",
+                                "target_id": target_id,
+                                "message": (
+                                    f"{record.object_id} child_of target is missing: "
+                                    f"{target_id}"
+                                ),
+                            }
+                        )
+                    elif not any(match.object_type == "knowledge" for match in matches):
+                        issues.append(
+                            {
+                                "code": "child_of_non_knowledge_target",
+                                "object_id": record.object_id,
+                                "field": "relations",
+                                "target_id": target_id,
+                                "message": (
+                                    f"{record.object_id} child_of target must be knowledge: "
+                                    f"{target_id}"
+                                ),
+                            }
+                        )
+        if child_of_count > 1:
+            issues.append(
+                {
+                    "code": "multiple_child_of",
+                    "object_id": record.object_id,
+                    "field": "relations",
+                    "message": f"{record.object_id} has multiple child_of relations",
+                }
             )
+    issues.extend(_knowledge_hierarchy_cycle_issues(records))
+
+
+def _knowledge_hierarchy_issues(
+    records: list[ObjectRecord],
+    workspace: Workspace,
+) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    by_id = {record.object_id: [record] for record in records}
+    _append_relation_consistency_issues(records, by_id, workspace, issues)
+    return issues
+
+
+def _knowledge_hierarchy_cycle_issues(records: list[ObjectRecord]) -> list[dict[str, str]]:
+    parent_by_child = {
+        record.object_id: parent_id
+        for record in records
+        if record.object_type == "knowledge"
+        for parent_id in [_child_of_target(record)]
+        if parent_id
+    }
+    issues: list[dict[str, str]] = []
+    reported: set[frozenset[str]] = set()
+    for start in sorted(parent_by_child):
+        path: list[str] = []
+        seen_at: dict[str, int] = {}
+        current: str | None = start
+        while current in parent_by_child:
+            if current in seen_at:
+                cycle = path[seen_at[current] :]
+                cycle_ids = frozenset(cycle)
+                cycle_key = " -> ".join(cycle + [current])
+                if cycle_ids not in reported:
+                    reported.add(cycle_ids)
+                    issues.append(
+                        {
+                            "code": "child_of_cycle",
+                            "object_id": start,
+                            "field": "relations",
+                            "message": f"child_of cycle detected: {cycle_key}",
+                        }
+                    )
+                break
+            seen_at[current] = len(path)
+            path.append(current)
+            current = parent_by_child.get(current)
+    return issues
+
+
+def _child_of_target(record: ObjectRecord) -> str | None:
+    for relation in record.metadata.get("relations", []):
+        if not isinstance(relation, dict):
+            continue
+        if relation.get("type") != HIERARCHY_RELATION_TYPE:
+            continue
+        target_id = relation.get("target")
+        if isinstance(target_id, str) and target_id.strip():
+            return target_id
+    return None
 
 
 def _append_knowledgebase_membership_issues(
@@ -1903,18 +2217,6 @@ def _join_strings(value: Any) -> str:
     return ", ".join(_string_items(value))
 
 
-def _format_bindings(value: Any) -> str:
-    if not _is_mapping_list(value):
-        return ""
-    bindings: list[str] = []
-    for binding in value:
-        binding_type = binding.get("type")
-        object_id = binding.get("id")
-        if isinstance(binding_type, str) and isinstance(object_id, str):
-            bindings.append(f"{binding_type}:{object_id}")
-    return ", ".join(bindings)
-
-
 def _table_row(values: list[str]) -> str:
     return "| " + " | ".join(_escape_table_cell(value) for value in values) + " |"
 
@@ -1989,15 +2291,17 @@ def _validate_knowledge_review_refs(
                 f"reviewed kb_id must reference knowledge-base: {kb_id}; "
                 "remove it or create/pass an existing kb-YYYYMMDD-001 ID"
             )
+    _validate_child_of_count(relations, REVIEW_RELATION_SHAPE)
     for relation in relations:
         relation_type = relation.get("type")
         target_id = relation.get("target")
-        if not isinstance(relation_type, str) or not relation_type.strip():
-            raise RepositoryError(f"{REVIEW_RELATION_SHAPE}; relation.type must be non-empty")
+        _validate_relation_type(relation_type, REVIEW_RELATION_SHAPE)
         if not isinstance(target_id, str) or not target_id.strip():
             raise RepositoryError(
                 f"{REVIEW_RELATION_SHAPE}; relation.target must be an existing knowledge ID"
             )
+        if relation_type == HIERARCHY_RELATION_TYPE and target_id == self_knowledge_id:
+            raise RepositoryError("child_of relation must not target the same knowledge object")
         if target_id == self_knowledge_id:
             continue
         record = _find_single_object(repository, target_id)
@@ -2347,16 +2651,12 @@ def _validate_note_input(
     *,
     content: str,
     title: str | None,
-    tags: list[str] | None,
-    bindings: list[dict[str, Any]] | None,
     note_id: str | None,
 ) -> None:
     if not isinstance(content, str) or not content.strip():
         raise RepositoryError("note content must be a non-empty string")
     if title is not None and not title.strip():
         raise RepositoryError("note title must be non-empty when provided; omit it to derive one")
-    if tags is not None and not _is_string_list(tags):
-        raise RepositoryError("note tags must be a list of strings; use [] when empty")
     if note_id is not None:
         if not ID_RE.match(note_id) or not note_id.startswith("note-"):
             raise RepositoryError(
@@ -2365,52 +2665,17 @@ def _validate_note_input(
             )
         if note_id in _id_paths(repository):
             raise RepositoryError(f"note ID already exists: {note_id}")
-    if bindings is not None and not _is_mapping_list(bindings):
-        raise RepositoryError(
-            "note bindings must be a list of mappings like "
-            "{'type': 'source', 'id': 'source-YYYYMMDD-001'}; use [] when unbound"
-        )
-    for binding in bindings or []:
-        _validate_note_binding(repository, binding)
 
 
 def _validate_note_llm_result(result: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(result, dict):
-        raise RepositoryError(
-            "llm_result must be a mapping like {'title': '<note title>', "
-            "'summary': '<optional summary>'}"
-        )
+        raise RepositoryError("llm_result must be a mapping like {'title': '<note title>'}")
     title = result.get("title")
     if not isinstance(title, str) or not title.strip():
         raise RepositoryError("llm_result.title must be a non-empty string")
-    summary = result.get("summary")
-    if summary is not None and not isinstance(summary, str):
-        raise RepositoryError("llm_result.summary must be a string when provided; omit if absent")
     return {
         "title": title.strip(),
-        "summary": summary.strip() if isinstance(summary, str) else None,
     }
-
-
-def _validate_note_binding(
-    repository: ObjectRepository,
-    binding: dict[str, Any],
-) -> None:
-    binding_type = binding.get("type")
-    object_id = binding.get("id")
-    if binding_type not in NOTE_BINDING_TYPES:
-        raise RepositoryError(
-            f"unsupported note binding type: {binding_type}; expected one of "
-            f"{', '.join(sorted(NOTE_BINDING_TYPES))}"
-        )
-    if not isinstance(object_id, str) or not object_id.strip():
-        raise RepositoryError("note binding id must be a non-empty string")
-    record = _find_single_object(repository, object_id)
-    if record.object_type != binding_type:
-        raise RepositoryError(
-            f"note binding {object_id} is {record.object_type}, expected {binding_type}; "
-            "set binding.type to the actual object type or use a matching object ID"
-        )
 
 
 def _note_title(content: str) -> str:
@@ -2436,7 +2701,6 @@ def _note_response_extra(
     return {
         "note_id": note_id,
         "path": relative_path,
-        "summary": _summarize_text(document.body),
         "note": _note_payload(note_id, relative_path, document),
     }
 
@@ -2446,13 +2710,281 @@ def _note_payload(
     relative_path: str,
     document: MarkdownDocument,
 ) -> dict[str, Any]:
+    frontmatter = dict(document.frontmatter)
+    _clean_note_frontmatter(frontmatter)
     return {
         "id": note_id,
         "path": relative_path,
-        "frontmatter": document.frontmatter,
+        "frontmatter": frontmatter,
         "body": document.body,
-        "body_summary": _summarize_text(document.body),
     }
+
+
+def _clean_note_frontmatter(frontmatter: dict[str, Any]) -> None:
+    for field in ("bindings", "tags", "summary"):
+        frontmatter.pop(field, None)
+    frontmatter["status"] = _note_status(str(frontmatter.get("status", "")))
+
+
+def _note_status(status: str) -> str:
+    return "deprecated" if status == "deprecated" else "active"
+
+
+def _clean_expectations() -> dict[str, Any]:
+    return {
+        "directories": list(INIT_DIRECTORIES),
+        "object_schemas": {
+            object_type: {
+                "required_fields": sorted(schema["required"]),
+                "allowed_fields": sorted(schema["allowed"]),
+            }
+            for object_type, schema in _clean_object_schemas().items()
+        },
+        "note": {
+            "directories": ["notes/active", "notes/deprecated"],
+            "statuses": ["active", "deprecated"],
+            "removed_fields": ["bindings", "tags", "summary"],
+        },
+    }
+
+
+def _clean_differences(
+    workspace: Workspace,
+    repository: ObjectRepository,
+) -> list[dict[str, Any]]:
+    differences: list[dict[str, Any]] = []
+    for relative_dir in sorted(INIT_DIRECTORIES):
+        if not workspace.resolve(relative_dir).is_dir():
+            differences.append(
+                {
+                    "kind": "missing_directory",
+                    "path": relative_dir,
+                    "expected": "directory exists",
+                }
+            )
+
+    for legacy_dir in ("notes/inbox", "notes/bound", "notes/archive"):
+        path = workspace.resolve(legacy_dir)
+        if path.exists():
+            differences.append(
+                {
+                    "kind": "legacy_directory",
+                    "path": legacy_dir,
+                    "expected": "notes/active or notes/deprecated",
+                    "migration": "move contained note Markdown files to notes/active unless deprecated",
+                }
+            )
+
+    for record in _all_records(repository):
+        _append_field_schema_differences(record, workspace, differences)
+        if record.object_type != "note":
+            continue
+        relative_path = str(workspace.relative(record.path))
+        legacy_fields = [
+            field for field in ("bindings", "tags", "summary") if field in record.metadata
+        ]
+        if legacy_fields:
+            differences.append(
+                {
+                    "kind": "legacy_fields",
+                    "object_id": record.object_id,
+                    "object_type": "note",
+                    "path": relative_path,
+                    "fields": legacy_fields,
+                    "migration": "delete these frontmatter fields",
+                }
+            )
+        if record.status not in {"active", "deprecated"}:
+            differences.append(
+                {
+                    "kind": "legacy_status",
+                    "object_id": record.object_id,
+                    "object_type": "note",
+                    "path": relative_path,
+                    "current": record.status,
+                    "expected": _note_status(record.status),
+                    "migration": "update note status",
+                }
+            )
+
+        expected_dir = "notes/deprecated" if record.status == "deprecated" else "notes/active"
+        expected_path = f"{expected_dir}/{record.path.name}"
+        if relative_path != expected_path and relative_path.startswith("notes/"):
+            diff: dict[str, Any] = {
+                "kind": "path_migration",
+                "object_id": record.object_id,
+                "object_type": "note",
+                "from": relative_path,
+                "to": expected_path,
+                "migration": "move note file",
+            }
+            target = workspace.resolve(expected_path)
+            if target.exists() and target != record.path:
+                diff["risk"] = "target_exists"
+            differences.append(diff)
+    return differences
+
+
+def _append_field_schema_differences(
+    record: ObjectRecord,
+    workspace: Workspace,
+    differences: list[dict[str, Any]],
+) -> None:
+    schemas = _clean_object_schemas()
+    schema = schemas.get(record.object_type)
+    relative_path = str(workspace.relative(record.path))
+    if schema is None:
+        differences.append(
+            {
+                "kind": "unknown_object_type",
+                "object_id": record.object_id,
+                "object_type": record.object_type,
+                "path": relative_path,
+                "expected": sorted(schemas),
+                "migration": "review object type before migration",
+            }
+        )
+        return
+
+    fields = set(record.metadata)
+    missing = sorted(schema["required"] - fields)
+    if missing:
+        differences.append(
+            {
+                "kind": "missing_fields",
+                "object_id": record.object_id,
+                "object_type": record.object_type,
+                "path": relative_path,
+                "fields": missing,
+                "migration": "add required frontmatter fields with reviewed values",
+            }
+        )
+
+    unexpected = sorted(fields - schema["allowed"])
+    if unexpected:
+        differences.append(
+            {
+                "kind": "unexpected_fields",
+                "object_id": record.object_id,
+                "object_type": record.object_type,
+                "path": relative_path,
+                "fields": unexpected,
+                "migration": "remove or migrate unsupported frontmatter fields",
+            }
+        )
+
+
+def _clean_object_schemas() -> dict[str, dict[str, set[str]]]:
+    object_fields = {"id", "type", "title", "status", "created", "updated"}
+    review_fields = {"reviewed_by", "reviewed_at", "review_decision"}
+    return {
+        "source": {
+            "required": object_fields
+            | {
+                "source_type",
+                "path",
+                "summary",
+                "cleaned",
+                "authors",
+                "published_at",
+                "imported_at",
+                "deprecated_at",
+                "deprecated_reason",
+                "tags",
+            },
+            "allowed": object_fields
+            | review_fields
+            | {
+                "source_type",
+                "path",
+                "summary",
+                "cleaned",
+                "authors",
+                "published_at",
+                "imported_at",
+                "deprecated_at",
+                "deprecated_reason",
+                "tags",
+                "source_url",
+            },
+        },
+        "candidate": {
+            "required": object_fields
+            | {
+                "source_refs",
+                "note_refs",
+                "suggested_tags",
+                "suggested_kb_ids",
+                "evidence",
+                "relations",
+                "review",
+            },
+            "allowed": object_fields
+            | {
+                "source_refs",
+                "note_refs",
+                "suggested_tags",
+                "suggested_kb_ids",
+                "evidence",
+                "relations",
+                "review",
+            },
+        },
+        "knowledge": {
+            "required": object_fields
+            | {
+                "tags",
+                "source_refs",
+                "evidence",
+                "kb_ids",
+                "relations",
+                "deprecated_at",
+                "deprecated_reason",
+            },
+            "allowed": object_fields
+            | review_fields
+            | {
+                "tags",
+                "source_refs",
+                "note_refs",
+                "evidence",
+                "kb_ids",
+                "relations",
+                "review_reason",
+                "deprecated_at",
+                "deprecated_reason",
+            },
+        },
+        "knowledge-base": {
+            "required": object_fields
+            | {
+                "description",
+                "acceptance_criteria",
+                "knowledge_ids",
+                "tags",
+            },
+            "allowed": object_fields
+            | review_fields
+            | {
+                "description",
+                "acceptance_criteria",
+                "knowledge_ids",
+                "tags",
+            },
+        },
+        "note": {
+            "required": object_fields | {"deprecated_at", "deprecated_reason"},
+            "allowed": object_fields
+            | review_fields
+            | {"deprecated_at", "deprecated_reason"},
+        },
+    }
+
+
+def _clean_warnings(differences: list[dict[str, Any]]) -> list[str]:
+    if any(diff.get("risk") == "target_exists" for diff in differences):
+        return ["clean migration has target path conflicts; do not overwrite files."]
+    return []
 
 
 def _move_or_update_note_document(
@@ -3136,14 +3668,6 @@ def _source_deprecation_impacts(
             if evidence_id == source_id:
                 fields.append("evidence")
                 break
-        for binding in record.metadata.get("bindings", []):
-            if (
-                isinstance(binding, dict)
-                and binding.get("type") == "source"
-                and binding.get("id") == source_id
-            ):
-                fields.append("bindings")
-                break
         if fields:
             impacts.append(
                 {
@@ -3269,7 +3793,7 @@ def _plan_candidate_records(
             draft_note_ids,
         )
         relations = draft.get("relations", [])
-        _validate_candidate_relations(repository, relations)
+        _validate_candidate_relations(repository, relations, self_knowledge_id=candidate_id)
         suggested_kb_ids = draft.get("suggested_kb_ids", [])
         _validate_candidate_suggested_kb_ids(repository, suggested_kb_ids)
 
@@ -3395,23 +3919,44 @@ def _validate_evidence(
 def _validate_candidate_relations(
     repository: ObjectRepository,
     relations: list[dict[str, Any]],
+    *,
+    self_knowledge_id: str | None = None,
 ) -> None:
+    _validate_child_of_count(relations, CANDIDATE_RELATION_SHAPE)
     for relation in relations:
         relation_type = relation.get("type")
         target_id = relation.get("target")
-        if not isinstance(relation_type, str) or not relation_type.strip():
-            raise RepositoryError(f"{CANDIDATE_RELATION_SHAPE}; relation.type must be non-empty")
+        _validate_relation_type(relation_type, CANDIDATE_RELATION_SHAPE)
         if not isinstance(target_id, str) or not target_id.strip():
             raise RepositoryError(
                 f"{CANDIDATE_RELATION_SHAPE}; "
                 "relation.target must be an existing knowledge ID"
             )
+        if relation_type == HIERARCHY_RELATION_TYPE and target_id == self_knowledge_id:
+            raise RepositoryError("child_of relation must not target the same candidate ID")
         target = _find_single_object(repository, target_id)
         if target.object_type != "knowledge":
             raise RepositoryError(
                 f"candidate relation target must be knowledge: {target_id}; "
                 "remove non-knowledge targets or replace target with an existing knowledge ID"
             )
+
+
+def _validate_relation_type(value: Any, shape_message: str) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise RepositoryError(f"{shape_message}; relation.type must be non-empty")
+    if value not in RELATION_TYPES:
+        raise RepositoryError(
+            f"{shape_message}; relation.type must be one of: {RELATION_TYPE_LIST}"
+        )
+
+
+def _validate_child_of_count(relations: list[dict[str, Any]], shape_message: str) -> None:
+    count = sum(1 for relation in relations if relation.get("type") == HIERARCHY_RELATION_TYPE)
+    if count > 1:
+        raise RepositoryError(
+            f"{shape_message}; each knowledge object may have at most one child_of"
+        )
 
 
 def _validate_candidate_suggested_kb_ids(

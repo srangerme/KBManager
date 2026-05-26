@@ -29,7 +29,7 @@ You draft a merge proposal for a human reviewer.
 
 Return only structured merge assistance: merged body draft, tags, knowledgebase IDs, relations, and evidence review.
 
-Use `relations: []` when there are no relations. If a relation is proposed, each item must include non-empty `type` and `target`, and `target` must be an existing knowledge ID such as `knowledge-YYYYMMDD-001`; never point a relation at a source, note, candidate, or blank placeholder.
+Use `relations: []` when there are no relations. If a relation is proposed, each item must include non-empty `type` and `target`; `type` must be one of `agrees`, `conflicts`, `related_to`, or `child_of`, and `target` must be an existing knowledge ID such as `knowledge-YYYYMMDD-001`; never point a relation at a source, note, candidate, or blank placeholder. Use only `child_of` for hierarchy, meaning the merged knowledge is a child of the target knowledge.
 
 ## Constraints
 

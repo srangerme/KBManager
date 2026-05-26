@@ -14,9 +14,11 @@ COMMAND_DIR = REPO_ROOT / "commands"
 DOCUMENTED_COMMANDS = [
     "candidate-review.md",
     "check.md",
+    "clean.md",
     "init.md",
     "knowledgebase-create.md",
     "knowledgebase-list.md",
+    "knowledgebase-map.md",
     "lark-server-start.md",
     "lark-server-status.md",
     "lark-server-stop.md",
@@ -49,9 +51,10 @@ COMMAND_OPTIONAL_FIELDS = {
     "init.md": ["dry_run"],
     "source-add.md": ["title", "tags", "authors"],
     "candidate-review.md": ["candidate_id", "reason", "merge_targets"],
-    "note-add.md": ["title", "tags", "bindings"],
+    "note-add.md": ["title"],
     "knowledgebase-create.md": ["tags", "body"],
     "knowledgebase-list.md": ["knowledgebase_id"],
+    "knowledgebase-map.md": ["knowledgebase_id"],
 }
 
 WRITE_COMMANDS = {
@@ -275,7 +278,7 @@ def test_note_add_command_always_uses_llm_before_write() -> None:
     text = (COMMAND_DIR / "note-add.md").read_text(encoding="utf-8")
 
     assert "Always call `kb.note.add` first with `needs_llm: true`" in text
-    assert "Always use the note title/summary LLM flow before writing the note" in text
+    assert "Always use the note title LLM flow before writing the note" in text
     assert "Never pass `title: \"\"`" in text
 
 

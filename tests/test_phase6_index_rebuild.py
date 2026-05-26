@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from kbmanager.application import index_rebuild, init_workspace
+from kbmanager.application import index_rebuild, init_workspace, knowledgebase_map
 from kbmanager.repository import MarkdownDocument, ObjectRepository
 from kbmanager.workspace import Workspace
 
@@ -108,7 +108,7 @@ def _seed_index_objects(tmp_path: Path) -> None:
                 }
             ],
             "kb_ids": [],
-            "relations": [{"type": "related", "target": "knowledge-20260520-001"}],
+            "relations": [{"type": "related_to", "target": "knowledge-20260520-001"}],
             "created": "2026-05-20",
             "updated": "2026-05-20",
         },
@@ -145,14 +145,12 @@ def _seed_index_objects(tmp_path: Path) -> None:
     )
     _write_markdown(
         tmp_path,
-        "notes/bound/note-20260520-001.md",
+        "notes/active/note-20260520-001.md",
         {
             "id": "note-20260520-001",
             "type": "note",
-            "title": "Bound Note",
-            "status": "bound",
-            "bindings": [{"type": "knowledge", "id": "knowledge-20260520-001"}],
-            "tags": ["note-tag"],
+            "title": "Active Note",
+            "status": "active",
             "created": "2026-05-20",
             "updated": "2026-05-20",
         },
@@ -165,8 +163,6 @@ def _seed_index_objects(tmp_path: Path) -> None:
             "type": "note",
             "title": "Deprecated Note",
             "status": "deprecated",
-            "bindings": [{"type": "source", "id": "source-20260520-002"}],
-            "tags": ["deprecated-tag"],
             "created": "2026-05-20",
             "updated": "2026-05-20",
         },
@@ -400,3 +396,114 @@ def test_index_rebuild_reports_knowledgebase_membership_mismatches(tmp_path: Pat
         (issue["object_id"], issue["field"], issue["target_id"])
         for issue in mismatches
     }
+
+
+def test_index_rebuild_reports_child_of_hierarchy_issues(tmp_path: Path) -> None:
+    init_workspace(tmp_path)
+    for knowledge_id, relations in [
+        ("knowledge-20260520-001", [{"type": "child_of", "target": "knowledge-20260520-002"}]),
+        ("knowledge-20260520-002", [{"type": "child_of", "target": "knowledge-20260520-001"}]),
+        (
+            "knowledge-20260520-003",
+            [
+                {"type": "child_of", "target": "knowledge-20260520-001"},
+                {"type": "child_of", "target": "knowledge-20260520-002"},
+            ],
+        ),
+        ("knowledge-20260520-004", [{"type": "supports", "target": "knowledge-20260520-001"}]),
+    ]:
+        _write_markdown(
+            tmp_path,
+            f"knowledge/atomic/{knowledge_id}.md",
+            {
+                "id": knowledge_id,
+                "type": "knowledge",
+                "title": knowledge_id,
+                "status": "accepted",
+                "tags": [],
+                "source_refs": [],
+                "evidence": [],
+                "kb_ids": [],
+                "relations": relations,
+                "created": "2026-05-20",
+                "updated": "2026-05-20",
+            },
+        )
+
+    result = index_rebuild(tmp_path, dry_run=True)
+
+    data = result.to_dict()
+    issue_codes = {issue["code"] for issue in data["issues"]}
+    assert data["status"] == "success"
+    assert "child_of_cycle" in issue_codes
+    assert "multiple_child_of" in issue_codes
+    assert "unknown_relation_type" in issue_codes
+
+
+def test_knowledgebase_map_writes_mermaid_tree(tmp_path: Path) -> None:
+    init_workspace(tmp_path)
+    _write_markdown(
+        tmp_path,
+        "knowledge/bases/kb-20260520-001.md",
+        {
+            "id": "kb-20260520-001",
+            "type": "knowledge-base",
+            "title": "Research KB",
+            "status": "active",
+            "description": "Research knowledge.",
+            "knowledge_ids": ["knowledge-20260520-001", "knowledge-20260520-002"],
+            "tags": [],
+            "created": "2026-05-20",
+            "updated": "2026-05-20",
+        },
+    )
+    _write_markdown(
+        tmp_path,
+        "knowledge/atomic/knowledge-20260520-001.md",
+        {
+            "id": "knowledge-20260520-001",
+            "type": "knowledge",
+            "title": "Learning-based Control",
+            "status": "accepted",
+            "tags": [],
+            "source_refs": [],
+            "evidence": [],
+            "kb_ids": ["kb-20260520-001"],
+            "relations": [],
+            "created": "2026-05-20",
+            "updated": "2026-05-20",
+        },
+    )
+    _write_markdown(
+        tmp_path,
+        "knowledge/atomic/knowledge-20260520-002.md",
+        {
+            "id": "knowledge-20260520-002",
+            "type": "knowledge",
+            "title": "Reinforcement Learning",
+            "status": "accepted",
+            "tags": [],
+            "source_refs": [],
+            "evidence": [],
+            "kb_ids": ["kb-20260520-001"],
+            "relations": [{"type": "child_of", "target": "knowledge-20260520-001"}],
+            "created": "2026-05-20",
+            "updated": "2026-05-20",
+        },
+    )
+    output = tmp_path / "map.md"
+
+    result = knowledgebase_map(
+        tmp_path,
+        knowledgebase_id="kb-20260520-001",
+        output_path=output,
+    )
+
+    data = result.to_dict()
+    assert data["status"] == "success"
+    assert data["path"] == str(output)
+    markdown = output.read_text(encoding="utf-8")
+    assert "```mermaid" in markdown
+    assert "Learning-based Control" in markdown
+    assert "Reinforcement Learning" in markdown
+    assert "knowledge_20260520_001 --> knowledge_20260520_002" in markdown

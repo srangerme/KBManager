@@ -44,7 +44,20 @@ flowchart TD
   C --> D["(interface) 展示更新的索引路径、问题和修复方案"]
 ```
 
-## 3. `/init`
+## 3. `/clean`
+
+```mermaid
+flowchart TD
+  A["(user) 输入命令"] --> B["(interface) 调用只读 clean inspection"]
+  B --> C["(api) kb.clean.inspect"]
+  C --> D{"(api) 是否存在迁移差异"}
+  D -- 否 --> E["(interface) 展示无需迁移"]
+  D -- 是 --> F["(LLM) 生成迁移计划"]
+  F --> G["(user) 整批确认"]
+  G --> H["(interface) 确认后直接修改文件并调用 kb.index.rebuild"]
+```
+
+## 4. `/init`
 
 ```mermaid
 flowchart TD
@@ -75,7 +88,18 @@ flowchart TD
   B --> C["(interface) 用 Claude Code 展示 knowledgebase index"]
 ```
 
-## 6. `/lark server start`
+## 6. `/knowledgebase map [knowledgebase-id]`
+
+```mermaid
+flowchart TD
+  A["(user) 输入命令"] --> B["(api) kb.knowledgebase.map"]
+  B --> C["(interface) 生成临时 Mermaid Markdown 文件"]
+  C --> D{"(interface) VSCode 是否可用"}
+  D -- 是 --> E["(interface) code --reuse-window 打开临时文件"]
+  D -- 否 --> F["(interface) 展示临时文件路径和 Markdown 内容"]
+```
+
+## 7. `/lark server start`
 
 ```mermaid
 flowchart TD
@@ -85,7 +109,7 @@ flowchart TD
   D --> E["(interface) 展示 pid、进程名和日志路径"]
 ```
 
-## 7. `/lark server status`
+## 8. `/lark server status`
 
 ```mermaid
 flowchart TD
@@ -94,7 +118,7 @@ flowchart TD
   C --> D["(interface) 展示 running、pid、日志和 settings 路径"]
 ```
 
-## 8. `/lark server stop`
+## 9. `/lark server stop`
 
 ```mermaid
 flowchart TD
@@ -103,7 +127,7 @@ flowchart TD
   C --> D["(interface) 展示停止的 pid 和日志路径"]
 ```
 
-## 9. `/note add`
+## 10. `/note add`
 
 ```mermaid
 flowchart TD
@@ -114,7 +138,7 @@ flowchart TD
   E --> F["(interface) 展示 note ID"]
 ```
 
-## 10. `/note deprecate <note-id>`
+## 11. `/note deprecate <note-id>`
 
 ```mermaid
 flowchart TD
@@ -125,7 +149,7 @@ flowchart TD
   E --> F["(interface) 展示结果"]
 ```
 
-## 11. `/note list`
+## 12. `/note list`
 
 ```mermaid
 flowchart TD
@@ -133,7 +157,7 @@ flowchart TD
   B --> C["(interface) 用 Claude Code 展示 note index"]
 ```
 
-## 12. `/note view <note-id>`
+## 13. `/note view <note-id>`
 
 ```mermaid
 flowchart TD
@@ -141,7 +165,7 @@ flowchart TD
   B --> C["(interface) 用 Claude Code 展示 note Markdown"]
 ```
 
-## 13. `/source add <path>`
+## 14. `/source add <path>`
 
 ```mermaid
 flowchart TD
@@ -153,7 +177,7 @@ flowchart TD
   F --> G["(interface) 展示 source 和 candidate ID"]
 ```
 
-## 14. `/source deprecate <source-id>`
+## 15. `/source deprecate <source-id>`
 
 ```mermaid
 flowchart TD

@@ -220,7 +220,7 @@ def test_accept_rejects_missing_reviewed_kb_and_relation_refs(tmp_path: Path) ->
         body="Reviewed knowledge body.",
         tags=[],
         kb_ids=[],
-        relations=[{"type": "related", "target": "knowledge-20260520-404"}],
+        relations=[{"type": "related_to", "target": "knowledge-20260520-404"}],
     )
 
     assert missing_kb.to_dict()["status"] == "failed"
@@ -313,7 +313,7 @@ def test_merge_updates_target_knowledge_and_rejects_source_candidate(tmp_path: P
         body="Merged reviewed body.",
         tags=["base", "merged"],
         kb_ids=[],
-        relations=[{"type": "extends", "target": target_id}],
+        relations=[{"type": "agrees", "target": target_id}],
     )
 
     data = result.to_dict()
@@ -325,7 +325,7 @@ def test_merge_updates_target_knowledge_and_rejects_source_candidate(tmp_path: P
     candidate_doc = repository.read_markdown(f"candidates/rejected/{candidate_id}.md")
     assert target_doc.frontmatter["tags"] == ["base", "merged"]
     assert target_doc.frontmatter["kb_ids"] == []
-    assert target_doc.frontmatter["relations"] == [{"type": "extends", "target": target_id}]
+    assert target_doc.frontmatter["relations"] == [{"type": "agrees", "target": target_id}]
     assert "Merged reviewed body." in target_doc.body
     assert candidate_doc.frontmatter["status"] == "rejected"
     assert candidate_doc.frontmatter["review"]["decision"] == "merge"
@@ -434,7 +434,7 @@ def test_merge_rolls_back_target_knowledge_when_candidate_move_fails(
         body="Merged reviewed body.",
         tags=["base", "merged"],
         kb_ids=[],
-        relations=[{"type": "extends", "target": target_id}],
+        relations=[{"type": "agrees", "target": target_id}],
     )
 
     assert result.to_dict()["status"] == "failed"

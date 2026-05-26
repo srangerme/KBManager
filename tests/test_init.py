@@ -154,4 +154,4 @@ def test_init_outputs_do_not_include_user_knowledge_objects(tmp_path: Path) -> N
     assert sorted(path.name for path in (tmp_path / "knowledge/bases").iterdir()) == [
         "KBM.ignore"
     ]
-    assert sorted(path.name for path in (tmp_path / "notes/inbox").iterdir()) == ["KBM.ignore"]
+    assert sorted(path.name for path in (tmp_path / "notes/active").iterdir()) == ["KBM.ignore"]

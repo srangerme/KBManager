@@ -572,13 +572,33 @@ class SlashCommandInterface:
             displayed_in_claude=[_display_markdown_path(self.root, path)],
         )
 
+    def kb_knowledgebase_map(
+        self,
+        knowledgebase_id: str | None = None,
+        *,
+        output_path: str | Path | None = None,
+    ) -> InterfaceResult:
+        calls: list[ApiCallRecord] = []
+        result = self._call(
+            calls,
+            "kb.knowledgebase.map",
+            knowledgebase_id=knowledgebase_id,
+            output_path=output_path,
+        )
+        opened = [result["path"]] if result.get("path") else []
+        return self._from_api_result(
+            result,
+            calls,
+            "Generated knowledgebase map.",
+            opened_in_vscode=opened,
+            displayed_in_claude=[],
+        )
+
     def kb_note_add(
         self,
         *,
         content: str | None = None,
         title: str | None = None,
-        tags: list[str] | None = None,
-        bindings: list[dict[str, Any]] | None = None,
     ) -> InterfaceResult:
         if content is None:
             return InterfaceResult(
@@ -588,7 +608,7 @@ class SlashCommandInterface:
                     _claude_request(
                         "note_markdown",
                         "add_note",
-                        "Reply with note Markdown content and optional title, tags, and bindings.",
+                        "Reply with note Markdown content and an optional title.",
                     )
                 ],
                 next_actions=["Provide the note content in Claude Code."],
@@ -599,13 +619,11 @@ class SlashCommandInterface:
             "kb.note.add",
             content=content,
             title=title,
-            tags=tags,
-            bindings=bindings,
             needs_llm=True,
         )
         if result["status"] == ApiStatus.NEEDS_LLM.value:
             llm_result = self._complete_llm(
-                "note_title_summary",
+                "note_title",
                 result.get("llm_request"),
                 {"content": content},
             )
@@ -614,8 +632,6 @@ class SlashCommandInterface:
                 "kb.note.add",
                 content=content,
                 title=title,
-                tags=tags,
-                bindings=bindings,
                 needs_llm=True,
                 resume_token=result["resume"]["token"],
                 llm_result=llm_result,
@@ -678,6 +694,19 @@ class SlashCommandInterface:
         calls: list[ApiCallRecord] = []
         result = self._call(calls, "kb.index.rebuild")
         return self._from_api_result(result, calls, "Rebuilt indexes and checked consistency.")
+
+    def kb_clean(self) -> InterfaceResult:
+        calls: list[ApiCallRecord] = []
+        result = self._call(calls, "kb.clean.inspect")
+        if result["status"] == ApiStatus.NEEDS_LLM.value:
+            llm_result = self._complete_llm(
+                "clean_migration_plan",
+                result.get("llm_request"),
+                {"differences": result.get("llm_request", {}).get("prompt", "")},
+            )
+            result = dict(result)
+            result["migration_plan"] = llm_result
+        return self._from_api_result(result, calls, "Inspected workspace for clean migration.")
 
     def _call(self, calls: list[ApiCallRecord], operation: str, **kwargs: Any) -> dict[str, Any]:
         result = self.api.call(operation, **kwargs)
@@ -1021,8 +1050,10 @@ _APPLICATION_OPERATIONS = {
     "kb.knowledge.merge": application.knowledge_merge,
     "kb.knowledge.deprecate": application.knowledge_deprecate,
     "kb.knowledgebase.create": application.knowledgebase_create,
+    "kb.knowledgebase.map": application.knowledgebase_map,
     "kb.note.add": application.note_add,
     "kb.note.get": application.note_get,
     "kb.note.deprecate": application.note_deprecate,
     "kb.index.rebuild": application.index_rebuild,
+    "kb.clean.inspect": application.clean_inspect,
 }
