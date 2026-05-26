@@ -8,6 +8,24 @@
 - `(interface)`：Claude Code / slash command 编排；review 草案和用户补充内容都通过 Claude Code 交互。
 - `(LLM)`：第一层用于意图解析、结果整理、问题展示或问答范围判断。
 - `(api)`：第二层 `kb.*` API 调用。
+
+## 流程影响审查
+
+| Slash command | 结论 | 说明 |
+| --- | --- | --- |
+| `/candidate review [candidate-id]` | 修改 | 展示 evidence、`bindto` 和 outline 修改建议；accept/merge 的 reviewed payload 包含 evidence，不自动改 outline。 |
+| `/check` | 修改 | 展示 `bindto`、outline 节点和 legacy 字段一致性问题。 |
+| `/clean` | 修改 | 特许迁移命令；完整计划经用户整批确认后才允许直接改对象文件，迁移计划需要覆盖 legacy `acceptance_criteria`、`kb_ids`、`child_of`。 |
+| `/init` | 不改主流程 | 初始化流程不受模型变化影响。 |
+| `/knowledgebase create [title]` | 修改 | 使用参数 title；为空时才询问用户 title，并创建最小 knowledgebase。 |
+| `/knowledgebase init <knowledgebase-id> <path-or-url>` | 支持 | 从 source-like input 初始化 knowledgebase 字段，但不创建 source。 |
+| `/knowledgebase list` | 字段同步 | 只读流程不变，展示内容随索引包含 `scope/outline`。 |
+| `/knowledgebase map [knowledgebase-id]` | 修改 | 基于 `outline + bindto`，不再基于 knowledge 层级关系。 |
+| `/lark server start/status/stop` | 不改主流程 | server 生命周期不受知识模型变化影响。 |
+| `/note add/list/view/deprecate` | 不改主流程 | note 操作流程不受知识模型变化影响。 |
+| `/source add <path>` | 修改 | candidate create 阶段先读 knowledgebase 定义，再生成 candidate。 |
+| `/source deprecate <source-id>` | 不改主流程 | source 废弃流程不受模型变化影响。 |
+
 ## 1. `/candidate review [candidate-id]`
 
 ```mermaid
@@ -18,21 +36,25 @@ flowchart TD
   C --> D
   D --> E["(interface) 用 Claude Code 展示 candidate Markdown"]
   E --> F["(LLM) 生成只读 review 辅助说明"]
-  F --> G["(interface) 展示 candidate、辅助说明和处理选项"]
-  G --> H["(user) 选择 accept/reject/defer/merge 并输入备注"]
-  H --> I{"(interface) 处理方式"}
-  I -- accept --> J["(interface) 在 Claude Code 展示 accept 草案"]
-  J --> K["(user) 确认或回复修改后的 Markdown"]
-  K --> L["(api) kb.knowledge.accept"]
-  I -- merge --> M["(interface) 在 Claude Code 展示 merge 草案"]
+  F --> G["(interface) 展示 candidate、evidence、bindto、outline 修改建议和处理选项"]
+  G --> H{"(interface) 是否存在 outline_change_suggestions"}
+  H -- 是 --> I["(user) 交互确认是否采纳或暂缓 outline 建议；不自动写 outline"]
+  H -- 否 --> J["(interface) 进入处理选择"]
+  I --> J
+  J --> K["(user) 选择 accept/reject/defer/merge 并输入备注"]
+  K --> L{"(interface) 处理方式"}
+  L -- accept --> M["(interface) 在 Claude Code 展示包含 evidence 的 accept 草案"]
   M --> N["(user) 确认或回复修改后的 Markdown"]
-  N --> O["(api) kb.knowledge.merge"]
-  I -- reject --> Q["(api) kb.knowledge.reject"]
-  I -- defer --> R["(api) kb.candidate.defer"]
-  L --> P["(interface) 展示处理结果"]
-  O --> P
-  Q --> P
-  R --> P
+  N --> O["(api) kb.knowledge.accept"]
+  L -- merge --> P["(interface) 在 Claude Code 展示包含 evidence 的 merge 草案"]
+  P --> Q["(user) 确认或回复修改后的 Markdown"]
+  Q --> R["(api) kb.knowledge.merge"]
+  L -- reject --> S["(api) kb.knowledge.reject"]
+  L -- defer --> T["(api) kb.candidate.defer"]
+  O --> U["(interface) 展示处理结果"]
+  R --> U
+  S --> U
+  T --> U
 ```
 
 ## 2. `/check`
@@ -41,7 +63,7 @@ flowchart TD
 flowchart TD
   A["(user) 输入命令"] --> B["(interface) 调用索引重建"]
   B --> C["(api) kb.index.rebuild"]
-  C --> D["(interface) 展示更新的索引路径、问题和修复方案"]
+  C --> D["(interface) 展示更新的索引路径、bindto/outline 问题、legacy 字段问题和修复方案"]
 ```
 
 ## 3. `/clean`
@@ -52,9 +74,9 @@ flowchart TD
   B --> C["(api) kb.clean.inspect"]
   C --> D{"(api) 是否存在迁移差异"}
   D -- 否 --> E["(interface) 展示无需迁移"]
-  D -- 是 --> F["(LLM) 生成迁移计划"]
+  D -- 是 --> F["(LLM) 生成迁移计划，覆盖 legacy acceptance_criteria、kb_ids、child_of"]
   F --> G["(user) 整批确认"]
-  G --> H["(interface) 确认后直接修改文件并调用 kb.index.rebuild"]
+  G --> H["(interface) /clean 特许迁移执行：确认后直接修改文件并调用 kb.index.rebuild"]
 ```
 
 ## 4. `/init`
@@ -68,19 +90,33 @@ flowchart TD
   D -- 否 --> F["(interface) 展示冲突原因，不创建文件"]
 ```
 
-## 4. `/knowledgebase create`
+## 5. `/knowledgebase create [title]`
 
 ```mermaid
 flowchart TD
-  A["(user) 输入命令"] --> B["(interface) 收集名称、描述、准入规则和标签"]
-  B --> C["(LLM) 生成 knowledgebase Markdown 草案"]
-  C --> D["(interface) 在 Claude Code 展示 Markdown 草案"]
-  D --> E["(user) 确认或回复修改后的 Markdown"]
-  E --> F["(api) kb.knowledgebase.create"]
-  F --> G["(interface) 展示 knowledgebase ID 和路径"]
+  A["(user) 输入命令和可选 title"] --> B{"(interface) title 是否非空"}
+  B -- 是 --> C["(interface) 使用参数 title"]
+  B -- 否 --> D["(interface) 询问用户 title"]
+  C --> E["(api) kb.knowledgebase.create"]
+  D --> E
+  E --> F["(interface) 展示 knowledgebase ID、路径和初始化下一步"]
 ```
 
-## 5. `/knowledgebase list`
+## 6. `/knowledgebase init <knowledgebase-id> <path-or-url>`
+
+```mermaid
+flowchart TD
+  A["(user) 输入 knowledgebase ID 和 source-like input"] --> B["(interface) 原样传递 input；URL 不自行下载或导出"]
+  B --> C["(api) kb.knowledgebase.init"]
+  C --> D["(interface) 接管 needs_llm 并生成 description、tags、scope、outline 草案"]
+  D --> E["(api) resume kb.knowledgebase.init 交回 llm_result 校验"]
+  E --> F["(interface) 展示 API 返回的 needs_review 草案"]
+  F --> G["(user) approve 或回复修改后的 Markdown/结构化字段"]
+  G --> H["(api) 带 review 和 reviewed payload 再次 resume kb.knowledgebase.init"]
+  H --> I["(interface) 展示初始化字段摘要和索引重建结果"]
+```
+
+## 7. `/knowledgebase list`
 
 ```mermaid
 flowchart TD
@@ -88,18 +124,18 @@ flowchart TD
   B --> C["(interface) 用 Claude Code 展示 knowledgebase index"]
 ```
 
-## 6. `/knowledgebase map [knowledgebase-id]`
+## 8. `/knowledgebase map [knowledgebase-id]`
 
 ```mermaid
 flowchart TD
   A["(user) 输入命令"] --> B["(api) kb.knowledgebase.map"]
-  B --> C["(interface) 生成临时 Mermaid Markdown 文件"]
+  B --> C["(interface) 展示基于 outline + bindto 的临时 Mermaid Markdown 文件"]
   C --> D{"(interface) VSCode 是否可用"}
   D -- 是 --> E["(interface) code --reuse-window 打开临时文件"]
   D -- 否 --> F["(interface) 展示临时文件路径和 Markdown 内容"]
 ```
 
-## 7. `/lark server start`
+## 9. `/lark server start`
 
 ```mermaid
 flowchart TD
@@ -109,7 +145,7 @@ flowchart TD
   D --> E["(interface) 展示 pid、进程名和日志路径"]
 ```
 
-## 8. `/lark server status`
+## 10. `/lark server status`
 
 ```mermaid
 flowchart TD
@@ -118,7 +154,7 @@ flowchart TD
   C --> D["(interface) 展示 running、pid、日志和 settings 路径"]
 ```
 
-## 9. `/lark server stop`
+## 11. `/lark server stop`
 
 ```mermaid
 flowchart TD
@@ -127,7 +163,7 @@ flowchart TD
   C --> D["(interface) 展示停止的 pid 和日志路径"]
 ```
 
-## 10. `/note add`
+## 12. `/note add`
 
 ```mermaid
 flowchart TD
@@ -138,7 +174,7 @@ flowchart TD
   E --> F["(interface) 展示 note ID"]
 ```
 
-## 11. `/note deprecate <note-id>`
+## 13. `/note deprecate <note-id>`
 
 ```mermaid
 flowchart TD
@@ -149,7 +185,7 @@ flowchart TD
   E --> F["(interface) 展示结果"]
 ```
 
-## 12. `/note list`
+## 14. `/note list`
 
 ```mermaid
 flowchart TD
@@ -157,7 +193,7 @@ flowchart TD
   B --> C["(interface) 用 Claude Code 展示 note index"]
 ```
 
-## 13. `/note view <note-id>`
+## 15. `/note view <note-id>`
 
 ```mermaid
 flowchart TD
@@ -165,7 +201,7 @@ flowchart TD
   B --> C["(interface) 用 Claude Code 展示 note Markdown"]
 ```
 
-## 14. `/source add <path>`
+## 16. `/source add <path>`
 
 ```mermaid
 flowchart TD
@@ -173,11 +209,11 @@ flowchart TD
   B --> C["(api) kb.source.add"]
   C --> D["(interface) 接管 source ingest needs_llm 并 resume"]
   D --> E["(api) kb.candidate.create"]
-  E --> F["(interface) 接管 candidate create needs_llm 并 resume"]
-  F --> G["(interface) 展示 source 和 candidate ID"]
+  E --> F["(interface) 接管 candidate create needs_llm：先读 knowledgebase 定义再读 source 内容"]
+  F --> G["(interface) resume 后展示 source summary/tags、candidate ID、bindto 和 outline 修改建议"]
 ```
 
-## 15. `/source deprecate <source-id>`
+## 17. `/source deprecate <source-id>`
 
 ```mermaid
 flowchart TD

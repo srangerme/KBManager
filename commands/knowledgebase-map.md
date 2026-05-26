@@ -1,5 +1,5 @@
 ---
-description: Open a Mermaid knowledge hierarchy map in VSCode
+description: Open a Mermaid knowledgebase outline map in VSCode
 disable-model-invocation: true
 ---
 
@@ -7,8 +7,8 @@ disable-model-invocation: true
 
 Use `$ARGUMENTS` as an optional `knowledgebase_id`. This command is read-only.
 
-- Without an ID, generate a Mermaid map for all accepted knowledge.
-- With an ID, generate a Mermaid map for accepted knowledge in that knowledgebase.
+- Without an ID, generate a Mermaid map for all active knowledgebase outlines and accepted knowledge bindings.
+- With an ID, generate a Mermaid map for that knowledgebase outline and accepted knowledge bound through `bindto`.
 - The map is written to a temporary Markdown file outside the repository and opened in VSCode.
 
 Call `kb.knowledgebase.map` through the plugin helper:
@@ -28,4 +28,4 @@ code --reuse-window '<path-from-result>'
 ```
 
 - If `code` is not available, print the generated file path and the returned `markdown` content in Claude Code.
-- If the command reports hierarchy issues, show the `issues` list to the user and suggest `/kbm:check`.
+- If the command reports invalid `bindto`, missing outline nodes, unbound knowledge, or other structure issues, show the `issues` list to the user and suggest `/kbm:check`.

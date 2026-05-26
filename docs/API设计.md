@@ -62,7 +62,7 @@ next_actions: []
 
 - API 必须返回结构化错误。
 - 涉及写入的 API 应支持 `dry_run`。
-- `needs_llm` 响应不得产生对象写入。
+- `needs_llm` 响应不得产生对象写入、状态变更或文件移动。采集类 API 可以在返回 `failed` 时写入诊断性失败报告，例如 `kb.source.add` 的 URL 采集失败报告写入 `data/failed/`；该失败报告不是 source、candidate、knowledge、knowledge base 或 note 对象，也不得被索引当作事实来源。
 - `needs_review` 响应不得产生任何对象写入、状态变更或文件移动。
 - 对象引用统一使用 ID。pending/deferred/rejected candidate 使用全局 knowledge ID；candidate 被 accept 后，原 candidate 文件被原子提升/迁移为正式 knowledge 文件，同一 ID 不得同时存在 candidate 文件和 knowledge 文件。
 
@@ -80,7 +80,10 @@ Interface 调用 kb.* API
   -> Claude Code 调用 LLM
   -> Claude Code 用 resume_token 回传 llm_result
   -> API 校验 LLM 输出结构和业务规则
-  -> API 写入对象或返回 needs_review
+  -> 无 review 要求时 API 写入对象
+  -> 有 review 要求时 API 返回 needs_review 草案
+  -> Claude Code 收集 user review 并用同一 resume_token 回传 reviewed_payload
+  -> API 校验 review 决策和 reviewed_payload 后写入对象
 ```
 
 `needs_llm` 响应：
@@ -113,6 +116,26 @@ resume_token: resume-20260520-001
 llm_result: {}
 ```
 
+带 review 的 resume 请求：
+
+```yml
+operation: kb.knowledgebase.init
+resume_token: resume-20260520-001
+llm_result: {}
+review:
+  decision: approve | reject | revise
+  reviewed_at: 2026-05-20T14:30:05
+reviewed_payload: {}
+```
+
+规则：
+
+- `resume_token` 只表示继续同一次 API 流程，不表示用户已经批准写入。
+- 对需要 LLM 且最终需要 user review 的写入 API，API 在收到 `llm_result` 后应先校验结构，再返回 `needs_review` 和待确认草案；缺少明确 review 决策时不得写入。
+- 用户确认或修改后，Interface 必须用同一个 `resume_token` 回传 `review` 和 `reviewed_payload`。API 只使用 `reviewed_payload` 落盘，不直接把未经 review 的 `llm_result` 写入对象事实。
+- `review.decision: approve` 才允许继续写入；`reject` 取消本次写入并返回 failed 或 success/noop；`revise` 要求 Interface 继续收集修改后的 reviewed payload。
+- 只需要 LLM 但不需要 review 的 API，可以在校验 `llm_result` 后直接写入。只需要 review 但不需要 LLM 的 API，必须在初次请求或后续请求中携带 review 决策和必要 reviewed payload。
+
 任何 LLM prompt 都由以下部分组成：
 
 1. KBManager 系统提示词：由中台随代码发布，定义角色、边界、行为、输出格式、review gate、数据写入约束和错误处理规则。
@@ -129,7 +152,7 @@ KBManager 本体不保存用户数据。用户侧不提供提示词文件，API 
 - `clean-migration-plan.md`
 - `candidate-review-assist.md`
 - `knowledge-merge-assist.md`
-- `knowledgebase-create.md`
+- `knowledgebase-init.md`
 
 Claude Code 的组装顺序：
 
@@ -170,8 +193,8 @@ constraints:
 API 收到 `llm_result` 后必须校验：
 
 - 输出符合 `output_schema`。
-- 所有 source、candidate、knowledge、note 引用存在。
-- 每条由 LLM 生成的事实性结论都必须携带可校验 evidence 引用。每个 evidence item 必须是 mapping，形如 `{source_id|object_id|id: <requested-source-or-note-id>, locator: <page/section/line>, quote|excerpt|snippet: <supporting text>}`；API 只校验证据引用存在、格式正确、来源状态可用和必填字段完整，不承担语义级事实判断。
+- 本次 schema 中声明的对象 ID 引用必须存在；LLM 事实性 `evidence` 只能引用本次 API 允许的上游 source。
+- 每条由 LLM 生成的事实性结论都必须携带可校验 evidence 引用。每个 evidence item 必须是 mapping，形如 `{source_id|object_id|id: <requested-source-id>, locator: <page/section/line>, quote|excerpt|snippet: <supporting text>}`；API 只校验证据引用存在、格式正确、来源状态可用和必填字段完整，不承担语义级事实判断。
 - LLM 没有绕过 review gate 生成 accepted knowledge。
 - 写入前仍满足对象状态机和一致性规则。
 
@@ -200,20 +223,20 @@ API 收到 `llm_result` 后必须校验：
 
 ### `kb.source.add`
 
-- 输入：目录、文件路径或 URL；可选标题、标签、作者。本地目录或文件可位于本机任意可读位置，不要求在 workspace 内。
+- 输入：目录、文件路径或 URL；可选标题和标签。本地目录或文件可位于本机任意可读位置，不要求在 workspace 内。
 - 读取：source 模板和输入资源。
-- 写入：source 对象及其 `cleaned` 派生字段；URL 直连成功时原文保存为 `data/raw/html/*.html` + `.meta.yml`，URL 直连失败但 Playwright PDF 导出成功时保存为 `data/raw/pdf/*.pdf` + `.meta.yml`，PDF 原文保存为 `data/raw/pdf/*.pdf` + `.meta.yml`，Markdown 原文保存为 `data/raw/md/*.md`。
-- LLM 辅助：必需。API 固定返回 `needs_llm`，由 Claude Code 在同一次 LLM 调用中生成 source 总结、cleaned content 和元数据建议后 resume。
+- 写入：source 对象字段 `id`、`type: source`、`title`、`source_type`、`status: raw`、`path`、`summary`、`cleaned`、`deprecated_at`、`deprecated_reason`、`tags`、`created`、`updated`；URL 直连成功时原文保存为 `data/raw/html/*.html` + `.meta.yml`，URL 直连失败但 Playwright PDF 导出成功时保存为 `data/raw/pdf/*.pdf` + `.meta.yml`，PDF 原文保存为 `data/raw/pdf/*.pdf` + `.meta.yml`，Markdown 原文保存为 `data/raw/md/*.md`。
+- LLM 辅助：必需。API 固定返回 `needs_llm`，由 Claude Code 在同一次 LLM 调用中生成 source `summary`、`tags` 和 `cleaned_content` 后 resume。
 - Interface 可在调用 `kb.source.add` 前处理可选临时 `user_prompt`：先由 LLM 重写为安全 prompt fragment，经用户确认后追加到 source ingest LLM 请求。该临时 prompt 不属于 `kb.source.add` 的持久化参数，也不得改变 API 的校验和写入语义。
-- 校验：本地路径可读或 URL 可采集、类型支持、元数据事实来源唯一；`summary` 非空；`cleaned_content` 可追溯原始资源；元数据建议不能覆盖事实字段。workspace 边界只限制 KBManager 对象和派生文件的写入位置，不限制本地 source 输入文件的读取位置。URL 采集完全由 API 负责：先直连下载，失败后尝试 Playwright 打印导出 PDF；若两者都失败，API 不创建 source，并将错误汇总写入 `data/failed`。Interface / Claude Code 不得自行下载、浏览器导出、抓取、保存 Markdown 或用本地文件路径重试 URL。
-- LLM 结果结构：单文件输入时 `llm_result` 必须包含 `input_path`、非空 `summary`、非空 `cleaned_content`；`cleaned_content` 必须包含请求的 `input_path`。目录输入产生多个 source 时，`llm_result.sources` 必须与请求的每个输入路径一一对应。`tags` 和 `authors` 如出现必须是字符串列表。
-- 输出：source ID、source 摘要、source 内的 cleaned 派生字段引用、原始资源引用。
+- 校验：本地路径可读或 URL 可采集、类型支持、元数据事实来源唯一；`summary` 非空；`tags` 必须是字符串列表，空值用 `[]`；`cleaned_content` 可追溯原始资源；LLM 不得覆盖事实字段。workspace 边界只限制 KBManager 对象和派生文件的写入位置，不限制本地 source 输入文件的读取位置。URL 采集完全由 API 负责：先直连下载，失败后尝试 Playwright 打印导出 PDF；若两者都失败，API 返回 `failed`，不创建 source，不返回 `needs_llm`，并将错误汇总写入 `data/failed/` 作为诊断性失败报告。Interface / Claude Code 不得自行下载、浏览器导出、抓取、保存 Markdown 或用本地文件路径重试 URL。
+- LLM 结果结构：单文件输入时 `llm_result` 必须包含 `input_path`、非空 `summary`、`tags` 字符串列表和非空 `cleaned_content`；`cleaned_content` 必须包含请求的 `input_path`。目录输入产生多个 source 时，`llm_result.sources` 必须与请求的每个输入路径一一对应，每项都必须包含 `input_path`、非空 `summary`、`tags` 和非空 `cleaned_content`。
+- 输出：source ID、source `summary`、`tags`、source 内的 cleaned 派生字段引用、原始资源引用。
 
 ### `kb.source.deprecate`
 
 - 输入：source ID、废弃原因、可选替代对象 ID。
 - 读取：source、引用它的 candidate 和 knowledge。
-- 写入：source `deprecated` 状态和废弃元数据；成功写入后 API 自动调用 `kb.index.rebuild` 重建派生索引。
+- 写入：source `status: deprecated`、`deprecated_at`、`deprecated_reason` 和 `updated`；成功写入后 API 自动调用 `kb.index.rebuild` 重建派生索引。
 - LLM 辅助：不需要。
 - Review gate：需要 user 确认。
 - 输出：deprecated source 和基于引用关系生成的影响列表。
@@ -222,33 +245,35 @@ API 收到 `llm_result` 后必须校验：
 
 ### `kb.candidate.create`
 
-- 输入：`source_ids` 和/或 `note_ids`，至少一个非空；每个 ID 必须指向已存在对象。source 可为 `raw`、`archived` 或 `deprecated`，deprecated source 会产生 warning 供 user review 时确认。
-- 读取：上游对象、candidate 模板、已有 knowledgebase 摘要、`candidate-create.md`。
-- 写入：一个或多个 pending candidate Markdown。
-- LLM 辅助：需要。API 返回 `needs_llm`，Claude Code 生成 candidate draft list、tag 建议和 knowledgebase 归属建议后 resume。
-- 校验：每个 candidate 必须有来源、证据和上游引用；candidate ID 必须是全局唯一的 knowledge ID，显式提供时必须形如 `knowledge-YYYYMMDD-001`，也可省略由 API 分配。
+- 输入：`source_ids`，至少一个非空；每个 ID 必须指向已存在 source。source 可为 `raw` 或 `deprecated`，deprecated source 会产生 warning 供 user review 时确认。
+- 读取：上游 source、candidate 模板、active knowledge base 的 `description`、`tags`、`scope` 和 `outline`、`candidate-create.md`。
+- 写入：一个或多个 pending candidate Markdown，字段包含 `id`、`type: candidate`、`title`、`status: pending`、`bindto`、`outline_change_suggestions`、`summary`、`evidence`、空 `review.reviewed_at`、空 `review.decision`、空 `review.reason`、`created`、`updated`。
+- LLM 辅助：需要。API 返回 `needs_llm`，Claude Code 先依据已有 knowledge base 的 `description/scope/outline` 判断 source 中哪些内容符合已有知识库要求，再生成 candidate draft list、`bindto` 建议和 outline 修改建议后 resume；candidate 只能从 source 生成，不能从 note 生成。
+- 校验：每个 candidate 必须有证据；candidate ID 必须是全局唯一的 knowledge ID，显式提供时必须形如 `knowledge-YYYYMMDD-001`，也可省略由 API 分配。
 - LLM 结果结构：
 
 ```yaml
 candidates:
   - id: knowledge-YYYYMMDD-001        # 可选；省略时由 API 分配
     title: non-empty string
-    body: non-empty string
-    source_refs: [source-YYYYMMDD-001]
-    note_refs: []
+    summary: non-empty string
+    content: non-empty string
     evidence:
       - source_id: source-YYYYMMDD-001 # 也可用 object_id 或 id
         locator: page/section/line
         quote: supporting text         # quote/excerpt/snippet 三者至少一个
-    suggested_tags: []
-    suggested_kb_ids: []               # 必须指向已有 knowledge-base ID
-    relations: []                      # 无关系时传 []
-    evidence_summary: optional string
-    llm_notes: optional string
+    bindto:
+      - kb_id: kb-YYYYMMDD-001-title
+        outline_node: node-id-or-path
+        reason: non-empty string
+    outline_change_suggestions:
+      - kb_id: kb-YYYYMMDD-001-title
+        reason: non-empty string
+        suggested_change: non-empty string
 ```
 
-- `source_refs` 和 `note_refs` 必须保留请求中的上游 ID。`relations` 有值时每项必须形如 `{type: <relation-type>, target: <existing-knowledge-id>}`，`type` 只能是 `agrees`、`conflicts`、`related_to`、`child_of`；`target` 只能指向已有正式 knowledge，不能留空，不能指向 source、note、candidate 或本次新建 candidate。层级关系只使用 `child_of`，且每个对象最多一个 `child_of`。
-- 输出：candidate/knowledge ID 列表、建议 tag、建议 knowledgebase ID。
+- `title`、`summary` 和 `content` 必须是非空字符串。candidate 和正式 knowledge 都只使用 `evidence` 追溯来源。`bindto[].kb_id` 必须指向已有 active knowledge base；`outline_node` 必须指向该 knowledge base 的现有 outline 节点。若内容属于某个 knowledge base 的 `scope` 但当前 `outline` 无法覆盖，则不得伪造 `outline_node`，应在 `outline_change_suggestions` 中说明建议如何修改。
+- 输出：candidate/knowledge ID 列表、`bindto` 建议和 outline 修改建议。
 
 ### `kb.candidate.get`
 
@@ -270,7 +295,7 @@ candidates:
 
 - 输入：candidate/knowledge ID、延后原因或备注。
 - 读取：candidate。
-- 写入：candidate deferred 状态和 review 记录。
+- 写入：candidate `status: deferred`、`review.reviewed_at`、`review.decision`、`review.reason` 和 `updated`。
 - LLM 辅助：不需要。
 - Review gate：必须携带 user 的 defer 决策。
 - 输出：deferred candidate。
@@ -279,32 +304,32 @@ candidates:
 
 ### `kb.knowledge.accept`
 
-- 输入：candidate/knowledge ID、review 决策、review 备注、用户 review 后的标题、正文、tags、kb_ids 和关系。
-- 读取：candidate、knowledge 模板、已有 knowledgebase 摘要。
-- 写入：将 pending candidate 文件原子提升/迁移为正式 knowledge Markdown，更新 `type: knowledge`、`status: accepted`、review 字段和 `kb_ids`，并同步对应 knowledgebase 的 `knowledge_ids`；同一 ID 不保留 candidate 文件。成功写入后 API 自动调用 `kb.index.rebuild` 重建派生索引。
-- LLM 辅助：不需要。tag 和 knowledgebase 建议在 `kb.candidate.create` 或 Interface review 辅助阶段生成，用户通过 Claude Code reviewed content 最终确认。
+- 输入：candidate/knowledge ID、review 决策、review 备注、用户 review 后的标题、`summary`、`content`、`evidence` 和 `bindto`。
+- 读取：candidate、knowledge 模板、已有 knowledge base 的 `outline` 摘要。
+- 写入：将 pending candidate 文件原子提升/迁移为正式 knowledge Markdown，写入 `type: knowledge`、`status: accepted`、`summary`、`evidence`、review 字段和 `bindto`；同一 ID 不保留 candidate 文件。成功写入后 API 自动调用 `kb.index.rebuild`，由索引根据 knowledge `bindto` 派生 knowledge base 成员视图。
+- LLM 辅助：不需要。`bindto` 和 outline 修改建议在 `kb.candidate.create` 或 Interface review 辅助阶段生成，用户通过 Claude Code reviewed content 最终确认。
 - Review gate：必须携带 user 的 accept 决策；写入内容必须来自用户在 Claude Code 确认后的 reviewed Markdown 或等价结构化输入。
-- reviewed payload 校验：`title` 和 `body` 必须是非空字符串；`tags` 和 `kb_ids` 必须显式提供字符串列表，空值用 `[]`；`relations` 必须显式提供，空值用 `[]`，有关联时每项形如 `{type: <relation-type>, target: <existing-knowledge-id>}`，`type` 只能是 `agrees`、`conflicts`、`related_to`、`child_of`。每个 `kb_id` 必须指向已有 knowledge-base；每个对象最多一个 `child_of`。
-- 输出：knowledge ID、写入 knowledge 的 `kb_ids` 列表。
-- 约束：本 API 不创建 knowledgebase 对象，也不提供独立 add/remove 成员维护能力；只根据最终 `kb_ids` 同步已有 knowledgebase 的 `knowledge_ids`。
+- reviewed payload 校验：`title`、`summary` 和 `content` 必须是非空字符串；`evidence` 必须来自 candidate 且至少引用一个 source；`bindto` 必须显式提供，空值用 `[]`，每项必须包含已有 active knowledge base ID 和有效 outline 节点。
+- 输出：knowledge ID、写入 knowledge 的 `bindto` 列表。
+- 约束：本 API 不创建 knowledge base 对象，不修改 knowledge base `outline`，也不提供独立 add/remove 成员维护能力；knowledge base 成员关系只由 knowledge `bindto` 表达，并通过索引派生展示。
 
 ### `kb.knowledge.merge`
 
-- 输入：pending candidate ID、目标 knowledge ID、review 决策、review 备注、用户 review 后的合并正文、tags、kb_ids 和关系。
-- 读取：pending candidate、目标 knowledge、来源、关系、已有 knowledgebase 摘要。
-- 写入：更新目标 knowledge，来源 candidate 变为 rejected 状态，更新目标 knowledge 的 `kb_ids`，并同步对应 knowledgebase 的 `knowledge_ids`；candidate ID 不生成同 ID knowledge 文件。成功写入后 API 自动调用 `kb.index.rebuild` 重建派生索引。
-- LLM 辅助：不需要。合并方案、tag 建议和 knowledgebase 归属建议由 Interface 层在 Claude Code review 前生成。
+- 输入：pending candidate ID、目标 knowledge ID、review 决策、review 备注、用户 review 后的合并 `summary`、`content`、`evidence` 和 `bindto`。
+- 读取：pending candidate、目标 knowledge、来源和已有 knowledge base 的 `outline` 摘要。
+- 写入：更新目标 knowledge 的 `summary`、`evidence`、正文、review 字段和 `bindto`，来源 candidate 变为 rejected 状态；candidate ID 不生成同 ID knowledge 文件。成功写入后 API 自动调用 `kb.index.rebuild`，由索引根据 knowledge `bindto` 派生 knowledge base 成员视图。
+- LLM 辅助：不需要。合并方案和 `bindto` 建议由 Interface 层在 Claude Code review 前生成。
 - Review gate：必须携带 user 的 merge 决策；写入内容必须来自用户在 Claude Code 确认后的 reviewed Markdown 或等价结构化输入。
-- reviewed payload 校验：`body` 必须是非空字符串；`tags`、`kb_ids`、`relations` 必须显式提供，空列表用 `[]`。`relations[].type` 只能是 `agrees`、`conflicts`、`related_to`、`child_of`；`relations[].target` 必须指向已有 knowledge；`kb_ids[]` 必须指向已有 knowledge-base。`target_knowledge_id` 必须是已 accepted 的 knowledge。
-- 输出：合并后的目标 knowledge、被合入的 candidate ID 和写入 knowledge 的 `kb_ids` 列表。
+- reviewed payload 校验：`summary` 和 `content` 必须是非空字符串；`evidence` 必须至少引用一个 source；`bindto` 必须显式提供，空列表用 `[]`。`bindto[].kb_id` 必须指向已有 active knowledge base 且 `outline_node` 必须存在。`target_knowledge_id` 必须是已 accepted 的 knowledge。
+- 输出：合并后的目标 knowledge、被合入的 candidate ID 和写入 knowledge 的 `bindto` 列表。
 - ID 规则：merge 到已有 knowledge 时，最终对象使用目标 knowledge ID；candidate 记录保留原 ID、状态为 `rejected`。同一 ID 不得同时存在 candidate 文件和 knowledge 文件。
-- 约束：本 API 不创建 knowledgebase 对象，也不提供独立 add/remove 成员维护能力；只根据最终 `kb_ids` 同步已有 knowledgebase 的 `knowledge_ids`。
+- 约束：本 API 不创建 knowledge base 对象，不修改 knowledge base `outline`，也不提供独立 add/remove 成员维护能力；knowledge base 成员关系只由 knowledge `bindto` 表达，并通过索引派生展示。
 
 ### `kb.knowledge.reject`
 
 - 输入：candidate/knowledge ID、review 决策、拒绝原因。
 - 读取：candidate。
-- 写入：candidate rejected 状态和 review 记录。
+- 写入：candidate `status: rejected`、`review.reviewed_at`、`review.decision`、`review.reason` 和 `updated`。
 - LLM 辅助：不需要。
 - Review gate：必须携带 user 的 reject 决策。
 - 输出：rejected candidate。
@@ -312,8 +337,8 @@ candidates:
 ### `kb.knowledge.deprecate`
 
 - 输入：knowledge ID、可选废弃原因。
-- 读取：knowledge、knowledgebase、relations、source。
-- 写入：knowledge deprecated 状态和废弃元数据；成功写入后 API 自动调用 `kb.index.rebuild` 重建派生索引。
+- 读取：knowledge、knowledgebase 和 source。
+- 写入：knowledge `status: deprecated`、`deprecated_at`、`deprecated_reason` 和 `updated`；成功写入后 API 自动调用 `kb.index.rebuild` 重建派生索引。
 - LLM 辅助：不需要。
 - Review gate：必须有 user 确认。
 - 输出：deprecated knowledge。
@@ -322,24 +347,35 @@ candidates:
 
 ### `kb.knowledgebase.create`
 
-- 输入：用户 review 后的结构化字段：`title`、`description`、`acceptance_criteria`、可选 `tags`、可选 `body`、可选 `knowledgebase_id`。
+- 输入：`title`，可选 `knowledgebase_id`。
 - 读取：knowledgebase 模板、已有 knowledgebase 摘要。
-- 写入：knowledgebase Markdown；成功写入后 API 自动调用 `kb.index.rebuild` 重建派生索引。
-- LLM 辅助：不需要。Interface 层负责询问必要字段并调用 LLM 生成草案，用户 review 后再调用 API 写入。
-- Review gate：必须携带 user 的 approve 决策。
-- 校验：`title`、`description`、`acceptance_criteria` 必须是非空字符串；`tags` 如提供必须是字符串列表；显式 `knowledgebase_id` 必须形如 `kb-YYYYMMDD-001` 或 `kb-YYYYMMDD-001-title-slug` 且全局唯一；标题不能与已有 knowledge-base 重复。
+- 写入：最小 knowledgebase Markdown，包含 `id`、`type: knowledge-base`、`title`、`status: initializing`、空 `description`、空 `tags`、空 `scope.includes/excludes`、空 `outline`、空 `reviewed_at`、空 `review_decision`、`created` 和 `updated`；成功写入后 API 自动调用 `kb.index.rebuild` 重建派生索引。
+- LLM 辅助：不需要。
+- Review gate：不需要。该 API 只创建最小空壳对象，不写入知识库定义内容，也不写入 review 相关字段内容；初始化 review 由 `kb.knowledgebase.init` 完成。
+- 校验：`title` 必须是非空字符串；显式 `knowledgebase_id` 必须形如 `kb-YYYYMMDD-001` 或 `kb-YYYYMMDD-001-title-slug` 且全局唯一；标题不能与已有 knowledge-base 重复。
 - 输出：knowledgebase ID、路径。
 - 约束：本 API 只创建 knowledgebase，不提供 knowledgebase add/remove 成员维护能力。
+
+### `kb.knowledgebase.init`
+
+- 输入：`knowledgebase_id`、`input_path` 或 URL/文件/目录等 source-like input；可选用户补充说明。输入格式与 `kb.source.add` 对齐，但语义不同。
+- 读取：目标 knowledgebase、knowledgebase 模板和输入材料。
+- 写入：只更新目标 knowledgebase 的 `description`、`tags`、`scope`、`outline`、`status: active`、`reviewed_at`、`review_decision` 和 `updated`；不创建 `source-*` 对象，不写入 `data/raw` 或 `data/cleaned`，不把输入材料加入 source index 或 knowledgebase 成员关系。
+- LLM 辅助：必需。API 返回 `needs_llm`，Claude Code 基于临时读取/采集的输入材料生成 `description`、`tags`、`scope` 和 `outline` 草案后 resume；API 校验 `llm_result` 后返回 `needs_review`，由 Interface 展示草案并收集用户确认或修改。
+- Review gate：必须在带 review 的 resume 请求中携带 user 的 approve 决策和 reviewed payload；写入内容必须来自用户在 Claude Code 确认后的 reviewed Markdown 或等价结构化输入。缺少 review 决策或 reviewed payload 时，API 返回 `needs_review`，不得写入。
+- 校验：目标 knowledgebase 必须存在且不是 `archived`；`description` 必须是非空字符串；`tags` 必须是字符串列表；`scope` 必须明确包含和排除范围；`outline` 可以是很大且复杂的节点树或节点列表，但每个可绑定节点必须有稳定 ID 或路径。
+- 输出：knowledgebase ID、路径、初始化字段摘要和自动索引重建结果。
+- 约束：本 API 的 source-like input 只是初始化上下文，不成为 KBManager source，也不作为后续 candidate 的证据来源。
 
 ### `kb.knowledgebase.map`
 
 - 输入：可选 `knowledgebase_id`、可选 `output_path`。
-- 读取：accepted knowledge、knowledgebase 成员关系和 knowledge frontmatter 中的 `child_of` 关系。
+- 读取：active knowledgebase 的 `outline` 和 accepted knowledge 的 `bindto`。
 - 写入：临时 Markdown 文件；不写入 repo-tracked index 或对象文件。
 - LLM 辅助：不需要。
 - Review gate：不需要，因为输出是派生视图。
-- 输出：临时 Markdown 路径、Mermaid Markdown 内容和层级一致性问题。
-- 约束：Mermaid 边方向为 parent -> child；`child_of` 表示当前 knowledge 是 target knowledge 的子节点。
+- 输出：临时 Markdown 路径、Mermaid Markdown 内容、未绑定 knowledge、无效 outline 节点引用和其他结构一致性问题。
+- 约束：Mermaid 图表达 outline 节点与绑定 knowledge 的结构；不从 knowledge relation 推导树状层级。
 
 ## 9. Note API
 
@@ -366,7 +402,7 @@ candidates:
 
 - 输入：note ID、废弃原因。
 - 读取：note。
-- 写入：note deprecated 状态和原因；将 note 文件移动到 `notes/deprecated/`。
+- 写入：note `status: deprecated`、`deprecated_at`、`deprecated_reason` 和 `updated`；将 note 文件移动到 `notes/deprecated/`。
 - LLM 辅助：不需要。
 - Review gate：需要 user 确认。
 - 输出：deprecated note。
@@ -375,12 +411,12 @@ candidates:
 
 ### `kb.index.rebuild`
 
-- 输入：重建范围 `all | source | candidate | knowledge | knowledgebase | note | relation | review_queue`，可选对象 ID、`dry_run`。
-- 读取：对象文件、frontmatter、`.meta.yml` 和引用关系。
+- 输入：重建范围 `all | source | candidate | knowledge | knowledgebase | note | review_queue`，可选对象 ID、`dry_run`。
+- 读取：对象文件、frontmatter、`.meta.yml`、knowledgebase `outline` 和 knowledge `bindto`。
 - 写入：目标范围内的派生索引文件；`dry_run` 时不写入，只返回拟更新 diff。
 - LLM 辅助：不需要。
 - Review gate：不需要，因为索引是派生视图，不是事实来源。
-- 输出：重建的索引路径、diff、发现的一致性问题和未修复项。
+- 输出：重建的索引路径、diff、发现的一致性问题和未修复项；一致性问题必须覆盖无效 `bindto`、不存在的 outline 节点、残留 legacy `child_of` 和 legacy `acceptance_criteria`。
 - 约束：不得把索引内容反向写回对象事实；对象文件和索引冲突时始终以对象文件为准。
 - 调用方式：对象写入 API 会在成功写入后自动调用非 dry-run `kb.index.rebuild`。`/check` 也直接调用非 dry-run `kb.index.rebuild`，用于重建派生索引并返回一致性问题。
 
@@ -389,7 +425,7 @@ candidates:
 - 输入：无。
 - 行为：只读扫描当前工作区目录设计和对象字段，对比当前版本预期。
 - LLM 辅助：存在差异时返回 `needs_llm`，Claude Code 根据差异生成迁移计划。
-- 输出差异：缺失目录、legacy 目录、legacy 字段、legacy 状态、路径迁移和冲突风险。
+- 输出差异：缺失目录、legacy 目录、legacy 字段、legacy 状态、路径迁移和冲突风险；字段差异必须识别 legacy `acceptance_criteria`、`kb_ids` 和 relation `child_of`。
 - 约束：API 不执行迁移、不写对象文件；`/clean` 在展示完整迁移计划并获得用户整批确认后，才允许 Claude Code 直接修改文件。
 
 ## 11. Review Gate
@@ -399,7 +435,7 @@ candidates:
 - source deprecated。
 - candidate defer。
 - knowledge accept/merge/reject/deprecate。
-- knowledgebase create。
+- knowledgebase init。
 - note deprecated。
 
 缺少 user review 时返回：

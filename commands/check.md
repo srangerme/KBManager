@@ -13,6 +13,6 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.index.rebuild '{}
 
 Rules:
 
-- Summarize updated index paths and consistency issues.
+- Summarize updated index paths and consistency issues, including invalid `bindto`, missing outline nodes, and legacy knowledge model fields when reported.
 - Do not write object files from this command.
 - Index writes must happen only through `kb.index.rebuild`.

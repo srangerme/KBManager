@@ -29,7 +29,8 @@ commands are invoked as:
 /kbm:check
 /kbm:clean
 /kbm:init
-/kbm:knowledgebase-create
+/kbm:knowledgebase-create [title]
+/kbm:knowledgebase-init <knowledgebase-id> <path-or-url>
 /kbm:knowledgebase-list [knowledgebase-id]
 /kbm:knowledgebase-map [knowledgebase-id]
 /kbm:lark-server-start
@@ -43,9 +44,23 @@ commands are invoked as:
 /kbm:source-deprecate <source-id> reason:<reason>
 ```
 
-Most commands are prompt skills. They instruct Claude Code to call the bundled
-helper, which invokes the second-layer API. Read-only list/view commands may
-read workspace index files directly, but must not edit KBManager object files.
+Most commands are prompt-driven command instructions. They instruct Claude Code
+to call the bundled helper, which invokes the second-layer API. Read-only
+list/view commands may read workspace index files directly, but must not edit
+KBManager object files.
+
+KBManager uses "skill" only for user-triggerable conversational helpers. LLM
+steps embedded inside commands, such as source ingest, candidate creation,
+candidate review assistance, merge assistance, and knowledgebase initialization,
+remain internal system prompts rather than user-facing skills. The planned
+`knowledgebase-deep-research-prompt` skill is user-triggerable: it reads a
+knowledgebase definition and produces a ChatGPT Deep Research prompt whose final
+report must list original reference URLs explicitly.
+
+`/kbm:knowledgebase-init <knowledgebase-id> <path-or-url>` initializes an
+existing knowledgebase shell through the `kb.knowledgebase.init` API. The input
+is temporary context only; it does not become a source object or a knowledgebase
+member.
 
 ## First Install
 

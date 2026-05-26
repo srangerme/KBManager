@@ -6,7 +6,6 @@ api: kb.candidate.create
 version: 1
 inputs:
   - source
-  - note
 outputs:
   - candidate_draft_list
 review_required: true
@@ -28,36 +27,39 @@ You draft pending KBManager candidate knowledge from approved upstream context.
 
 ## Output Format
 
-Return only a structured mapping with `candidates`. Every candidate must include a title, body, upstream references, and evidence items with an upstream object ID, locator, and quote, excerpt, or snippet.
+Return only a structured mapping with `candidates`. Every candidate must include a title, summary, content, evidence items with an upstream source ID, locator, and quote, excerpt, or snippet, plus `bindto` and `outline_change_suggestions`.
+
+Before drafting candidates, read the provided active knowledgebase definitions. Use each knowledgebase `description`, `scope`, and `outline` to decide whether any source content should become a candidate for that knowledgebase.
 
 Candidate draft shape:
 
 ```yaml
 candidates:
   - title: non-empty string
-    body: non-empty string
-    source_refs: [source-YYYYMMDD-001]
-    note_refs: []
+    summary: non-empty string
+    content: non-empty string
     evidence:
       - source_id: source-YYYYMMDD-001
         locator: page/section/line
         quote: exact supporting text
-    suggested_tags: []
-    suggested_kb_ids: []
-    relations: []
+    bindto:
+      - kb_id: kb-YYYYMMDD-001-title
+        outline_node: node-id-or-path
+        reason: non-empty string
+    outline_change_suggestions:
+      - kb_id: kb-YYYYMMDD-001-title
+        reason: non-empty string
+        suggested_change: non-empty string
 ```
 
-Use `relations: []` when there is no relation to an existing accepted knowledge object. If a relation exists, use `type` and `target`, where `type` must be one of:
-
-- `agrees`: the drafted candidate reaches a compatible conclusion or supports the target knowledge.
-- `conflicts`: the drafted candidate is incompatible with or contradicts the target knowledge.
-- `related_to`: the drafted candidate is relevant to the target knowledge but does not clearly agree, conflict, or form a hierarchy.
-- `child_of`: the drafted candidate is a child of the target knowledge in the knowledge hierarchy.
-
-The `target` must be an existing accepted knowledge ID such as `knowledge-YYYYMMDD-001`; never leave `target` blank and never point it at a source, note, candidate, or newly drafted candidate. Use only `child_of` for hierarchy, and include at most one `child_of` relation for each drafted candidate.
+Use `bindto: []` when there is no suitable knowledgebase outline node. If the content belongs to a knowledgebase scope but no outline node covers it, do not invent an outline node; add an `outline_change_suggestions` item instead.
 
 ## Constraints
 
-- Preserve every upstream source or note reference required by the API.
-- Suggested tags, knowledgebase IDs, and relations are recommendations only.
+- Preserve upstream traceability through `evidence`.
+- `bindto` and outline changes are recommendations only.
+- Use only existing knowledgebase outline node IDs or paths in `bindto`; do not invent outline nodes to make a binding fit.
+- When source content belongs in a knowledgebase but no current outline node can contain it, leave `bindto` empty for that missing node and describe the required outline change in `outline_change_suggestions`.
+- `outline_change_suggestions` must identify the affected knowledgebase, the missing or mismatched outline area, and the proposed change in reviewable language.
+- Do not modify knowledgebase outline; only describe needed changes in `outline_change_suggestions`.
 - Candidate status must remain pending and reviewable.

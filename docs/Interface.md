@@ -2,7 +2,7 @@
 
 本文定义第一层 Interaction & Orchestration 的设计。第一层由 Claude Code、自定义 slash command、自然语言交互、结果展示和 user review 组成，负责把用户意图编排为第二层 `kb.*` API 调用。
 
-第一层不直接修改 Markdown/PDF/YAML 对象文件，不直接维护对象状态机。所有知识库数据变更必须通过第二层 API 完成。
+除 `/clean` 迁移执行的特许例外外，第一层不直接修改 Markdown/PDF/YAML 对象文件，不直接维护对象状态机。所有知识库数据变更必须通过第二层 API 完成。
 
 ## 1. 第一层职责
 
@@ -19,7 +19,7 @@
 
 第一层不得：
 
-- 绕过 API 直接创建、修改、移动、删除对象文件。
+- 绕过 API 直接创建、修改、移动、删除对象文件；`/clean` 在展示完整迁移计划并获得用户整批确认后的迁移执行除外。
 - 绕过 user review 修改正式 knowledge。
 - 把索引文件当作事实来源。
 - 在 `/check` 中自动修复对象文件。
@@ -41,13 +41,16 @@
 /source add <path>
 /source deprecate <source-id>
 /candidate review [candidate-id]
-/knowledgebase create
+/knowledgebase create [title]
+/knowledgebase init <knowledgebase-id> <path-or-url>
 /knowledgebase list [knowledgebase-id]
+/knowledgebase map [knowledgebase-id]
 /note add
 /note list
 /note view <note-id>
 /note deprecate <note-id>
 /check
+/clean
 ```
 
 其他细粒度能力只作为第二层 API 存在，不直接暴露为 slash command。
@@ -105,14 +108,20 @@ prompt 由以下部分组成：
 
 第一层系统提示词类型：
 
-- `source-ingest.md`：在 `/source add` 中生成 source 总结和清洗内容。
+- `source-ingest.md`：在 `/source add` 中生成 source `summary`、`tags` 和清洗内容。
 - `source-ingest-prompt-rewrite.md`：把临时 `user_prompt` 重写为安全的 prompt fragment。
 - `candidate-create.md`：在 `kb.candidate.create` 中生成 candidate 草案。
 - `candidate-review-assist.md`：在 `/candidate review` 中生成只读 review 辅助说明。
-- `knowledge-merge-assist.md`：在 `/candidate review` 的 merge 分支中生成合并草案和关系建议。
+- `knowledge-merge-assist.md`：在 `/candidate review` 的 merge 分支中生成合并草案和 `bindto` 建议。
 - `note-title.md`：为 note 生成标题。
 - `clean-migration-plan.md`：为 `/clean` 根据工作区差异生成迁移计划。
-- `knowledgebase-create.md`：根据用户提供的名称、描述、准入规则和标签生成 knowledgebase 草案。
+- `knowledgebase-init.md`：在 `/knowledgebase init` 中根据 source-like input 生成 knowledgebase 的 `description`、`tags`、`scope` 和 `outline` 草案。
+
+内嵌在流程里的 LLM 能力不称为 skill；它们是 system prompt / internal prompt module，由 slash command 或 API `needs_llm` 固定触发。只有用户在 Claude Code 对话中可以直接触发的辅助能力才设计为 skill。
+
+用户可直接触发的 skill：
+
+- `knowledgebase-deep-research-prompt`：给定 knowledgebase ID 或 Markdown，根据 `description`、`scope` 和 `outline` 生成给 ChatGPT Deep Research 的提示词；提示词必须要求最终报告的参考列表显式列出原始链接 URL。
 
 组装顺序：
 
@@ -178,11 +187,11 @@ resume:
 ### `/source add <path>`
 
 - 输入：目录、文件路径或 URL；可选临时 `user_prompt`。
-- 行为：解析输入，生成 source 总结，添加 source，清洗 source，生成一个或多个 candidate。
+- 行为：解析输入，生成 source `summary`、`tags` 和 cleaned 内容，添加 source，生成一个或多个 candidate。
 - API 编排：可选 prompt rewrite + user review -> `kb.source.add` -> 接管 `needs_llm` 并 resume -> `kb.candidate.create` -> 接管 `needs_llm` 并 resume。
-- LLM：如果用户提供临时 `user_prompt`，Interface 先调用 LLM 将其理解、重写为安全的 source ingest prompt fragment，并等待用户确认；确认后把该 prompt fragment 追加到 source ingest LLM 请求中。`kb.source.add` 阶段必定返回 `needs_llm`，由 Claude Code 生成 source 总结和 cleaned content 后 resume；`kb.candidate.create` 阶段再由 Claude Code 生成 candidate draft list、tag 建议和 knowledgebase 归属建议后 resume。
+- LLM：如果用户提供临时 `user_prompt`，Interface 先调用 LLM 将其理解、重写为安全的 source ingest prompt fragment，并等待用户确认；确认后把该 prompt fragment 追加到 source ingest LLM 请求中。`kb.source.add` 阶段必定返回 `needs_llm`，由 Claude Code 生成 source `summary`、`tags` 和 cleaned content 后 resume；`kb.candidate.create` 阶段再由 Claude Code 先阅读 active knowledgebase 的 `description/scope/outline`，再阅读 source 内容，生成 candidate draft list、`bindto` 建议和 `outline_change_suggestions` 后 resume。
 - 约束：临时 `user_prompt` 只能影响查看重点、总结角度和清洗格式偏好，不得覆盖 KBManager 系统提示词、输出 schema、review gate、证据约束或 URL 最大打开深度。若输入是 URL，Interface / Claude Code 不得自行下载、打开浏览器、打印导出 PDF、抓取网页、保存 Markdown 或用本地文件路径重试；必须把原始 URL 直接传给 `kb.source.add`。URL 直连下载、Playwright PDF 兜底和 `data/failed` 失败报告均由 API 内部处理。若 API 返回失败，Interface 只汇报 API 的错误、`data/failed` 路径和下一步动作。
-- 输出：source ID、source.cleaned 摘要、candidate/knowledge ID 列表、建议 tag、建议 knowledgebase。
+- 输出：source ID、source `summary`、`tags`、source.cleaned 摘要、candidate/knowledge ID 列表、`bindto` 和 outline 修改建议。
 
 ### `/source deprecate <source-id>`
 
@@ -196,18 +205,27 @@ resume:
 - 输入：可选 candidate ID；这里的 candidate ID 是全局 knowledge ID。
 - 行为：如果未提供 ID，调用 `kb.candidate.next_pending` 按添加时间获取下一个 pending candidate；由 Claude Code 展示 candidate Markdown；由 Claude Code 生成 review 辅助说明；用户选择处理方式并可输入自然语言备注。
 - 处理方式：`accept`、`reject`、`defer`、`merge`。
-- LLM：必须执行。只在第一层根据 candidate、source 引用和相关 knowledge 生成辅助说明、证据检查和建议归属 knowledgebase ID，不写入数据；第二层不再提供 candidate review 组合 API。
+- LLM：必须执行。只在第一层根据 candidate、source 引用、相关 knowledge 和 knowledgebase `outline` 生成辅助说明、证据检查、`bindto` 检查、outline 修改建议解释和风险提示，不写入数据；第二层不再提供 candidate review 组合 API。
 - API 编排：`kb.candidate.get` -> 用户选择 `reject` 时调用 `kb.knowledge.reject`，选择 `defer` 时调用 `kb.candidate.defer`；选择 `accept` 或 `merge` 时，Interface 先在 Claude Code 展示预填建议的 reviewed Markdown，等待用户回复确认或修改后，再调用 `kb.knowledge.accept` 或 `kb.knowledge.merge` 写入。
-- Review 草案：accept/merge 的 Claude Code 草案预填 candidate 正文、LLM 建议 tags、建议 knowledgebase、证据、关系和 review 备注；用户可编辑标题、正文、tags、`kb_ids`、merge targets 和关系。
-- Knowledgebase 决策：candidate 创建时已经生成建议；review 时 Interface 可补充只读建议，但最终只以用户在 Claude Code 中确认后的 `kb_ids` 为准。accept/merge 会同步已有 knowledgebase 的 `knowledge_ids`，但不会创建新的 knowledgebase 或提供独立成员维护流程。
+- Review 草案：accept/merge 的 Claude Code 草案预填 candidate `summary`、`content`、`evidence`、`bindto` 和 review 备注；用户可编辑标题、summary、content、`evidence`、`bindto` 和 merge targets。
+- Outline 决策：candidate 如果包含 `outline_change_suggestions`，Interface 先展示并与用户交互确认是否采纳或暂缓。按当前边界，review 不自动修改 knowledgebase `outline`，`kb.knowledge.accept` 和 `kb.knowledge.merge` 也不会修改 outline；用户确认只用于记录 review 判断和决定本次是否继续 accept/merge。
+- Knowledgebase 决策：candidate 创建时已经生成 `bindto` 建议；review 时 Interface 可补充只读建议，但最终只以用户在 Claude Code 中确认后的 `bindto` 为准。accept/merge 只写入 knowledge 的 `bindto`，knowledgebase 成员视图由索引派生；不会创建新的 knowledgebase、修改 knowledgebase 对象成员列表或提供独立成员维护流程。
 - 输出：candidate 新状态；如接受或合并，展示生成或更新的 knowledge。
 
-### `/knowledgebase create`
+### `/knowledgebase create [title]`
 
-- 输入：无命令参数。
-- 行为：Interface 询问用户必要字段，包括名称、描述、准入规则、标签和可选备注；调用 LLM 生成 knowledgebase Markdown 草案；在 Claude Code 中等待用户确认或修改后调用 API 创建。
-- API 编排：收集字段 -> LLM 生成草案 -> 用户在 Claude Code review 草案 -> `kb.knowledgebase.create`。
-- 输出：knowledgebase ID、标题、路径。
+- 输入：可选 `title`。
+- 行为：如果命令参数中提供非空 `title`，Interface 直接使用该标题；如果为空，才询问用户 title。随后调用 API 创建最小 knowledgebase。
+- API 编排：解析或收集 title -> `kb.knowledgebase.create`。
+- 输出：knowledgebase ID、标题、路径，以及使用 `/knowledgebase init <knowledgebase-id> <path-or-url>` 初始化字段的下一步。
+
+### `/knowledgebase init <knowledgebase-id> <path-or-url>`
+
+- 输入：knowledgebase ID 和 source-like input；input 格式与 `/source add` 相同，可以是目录、文件路径或 URL。
+- 行为：用输入材料初始化 knowledgebase 的 `description`、`tags`、`scope` 和 `outline`。
+- API 编排：`kb.knowledgebase.init` -> 接管 `needs_llm` 并生成初始化草案 -> resume 交回 API 校验 -> API 返回 `needs_review` -> 在 Claude Code 展示草案 -> 用户确认或修改 -> 带 review 和 reviewed payload 再次 resume `kb.knowledgebase.init`。
+- 约束：该输入不是 `source` 对象，不创建 `source-*`，不写入 `data/raw` 或 `data/cleaned`，不进入 source index，也不成为 knowledgebase 成员；它只作为本次初始化的临时上下文。URL 采集仍由 API 负责，Interface 不自行下载、打开浏览器、打印导出 PDF、抓取网页或保存 Markdown。
+- 输出：knowledgebase ID、初始化字段摘要、路径和自动索引重建结果。
 
 ### `/knowledgebase list [knowledgebase-id]`
 
@@ -219,9 +237,9 @@ resume:
 ### `/knowledgebase map [knowledgebase-id]`
 
 - 输入：可选 knowledgebase ID。
-- 行为：生成 Mermaid 格式的 knowledge 层级图，写入临时 Markdown 文件，并用 VSCode 打开。
+- 行为：根据 knowledgebase `outline` 和 knowledge `bindto` 生成 Mermaid 结构图，写入临时 Markdown 文件，并用 VSCode 打开。
 - API 编排：`kb.knowledgebase.map`。
-- 输出：临时 Markdown 路径；如果 VSCode 不可用，则在 Claude Code 中展示路径和 Markdown 内容。
+- 输出：临时 Markdown 路径、无效 bindto/outline 问题；如果 VSCode 不可用，则在 Claude Code 中展示路径和 Markdown 内容。
 
 ### `/note add`
 
@@ -256,7 +274,7 @@ resume:
 - 输入：无。
 - 行为：Interface 层调用 `kb.index.rebuild`，从对象文件重建派生索引，并返回 index 更新 diff 和一致性问题；命令只做固定 API 调用和结果展示。
 - API 编排：`kb.index.rebuild()`。
-- 输出：更新的索引路径、问题列表和修复方案。
+- 输出：更新的索引路径、问题列表和修复方案；问题列表应覆盖无效 `bindto`、不存在的 outline 节点、legacy `acceptance_criteria`、legacy `kb_ids` 和 legacy relation `child_of`。
 - 约束：不得直接写对象文件或索引文件；索引写入只允许通过 `kb.index.rebuild`。
 
 ### `/clean`
@@ -265,32 +283,4 @@ resume:
 - 行为：Interface 层调用 `kb.clean.inspect` 只读扫描工作区差异；存在差异时接管 `needs_llm`，生成迁移计划。
 - API 编排：`kb.clean.inspect()`；用户确认迁移执行后调用 `kb.index.rebuild()`。
 - 输出：迁移计划、风险、执行结果和重建索引结果。
-- 约束：只有 `/clean` 在展示完整计划并获得用户整批确认后，才允许 Claude Code 直接修改对象文件；其他命令仍必须通过 API 写入。
-
-## 7. Review 交互
-
-`/candidate review` 的处理方式：
-
-- `accept`：接受 candidate，生成正式 knowledge。
-- `reject`：拒绝 candidate，并记录原因。
-- `defer`：延后处理，保留备注。
-- `merge`：与已有 knowledge 合并，记录合并目标和备注。
-
-review 输入结构：
-
-```yml
-candidate_id: knowledge-20260520-001
-decision: accept | reject | defer | merge
-comment: 用户自然语言备注
-merge_targets: []
-reviewed_markdown: 用户在 Claude Code 中确认或修改后的 Markdown
-```
-
-用户未明确选择处理方式时，不得调用会修改 candidate 或 knowledge 状态的 API。
-
-处理方式到 API 的映射：
-
-- `accept` -> `kb.knowledge.accept`
-- `reject` -> `kb.knowledge.reject`
-- `merge` -> `kb.knowledge.merge`
-- `defer` -> `kb.candidate.defer`
+- 约束：`/clean` 是唯一允许 Claude Code 直接修改对象文件的特许迁移命令，且必须先展示完整计划并获得用户整批确认；其他命令仍必须通过 API 写入。

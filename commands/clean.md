@@ -4,7 +4,7 @@ description: Inspect workspace schema drift and plan a migration
 
 # KBManager Clean
 
-Inspect the current workspace layout and object fields, then use Claude Code to plan a migration.
+Inspect the current workspace layout and object fields, then use Claude Code to plan a migration. Migration planning should identify legacy knowledgebase fields such as `acceptance_criteria`, old membership fields, and legacy hierarchy field `child_of` when the API reports them.
 
 Claude Code flow:
 
@@ -16,7 +16,7 @@ Claude Code flow:
 
 2. If the API returns `needs_llm`, use `llm_request` to generate the structured migration plan.
 3. Show the full plan to the user and request one explicit confirmation before changing files.
-4. Only after confirmation, execute the plan directly in the workspace files. This direct-edit permission applies only to `/clean` migration execution.
+4. Only after confirmation, execute the plan directly in the workspace files. This privileged direct-edit permission applies only to `/clean` migration execution.
 5. After migration, call `kb.index.rebuild` and report updated indexes and issues.
 
 Rules:

@@ -2,17 +2,24 @@
 id: kb-YYYYMMDD-001-knowledge-base-title
 type: knowledge-base
 title: Knowledge base title
-status: active
-description: Knowledge base description
-acceptance_criteria: Knowledge acceptance criteria
-knowledge_ids: []
+status: initializing
+description:
 tags: []
+scope:
+  includes: []
+  excludes: []
+outline: []
+reviewed_by:
+reviewed_at:
+review_decision:
 created: YYYY-MM-DDTHH:MM:SS
 updated: YYYY-MM-DDTHH:MM:SS
 ---
 
 ## Description
 
-## Acceptance Criteria
+## Scope
 
-## Knowledge List
+## Outline
+
+## Derived Member View

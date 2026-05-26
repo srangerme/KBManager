@@ -1,30 +1,17 @@
 ---
-description: Create a reviewed knowledge base
+description: Create a minimal knowledge base shell
 ---
 
 # KBManager Knowledgebase Create
 
-Collect title, description, acceptance criteria, optional tags, and optional body from the user. Generate a Markdown draft, display it in Claude Code for user review, then call the API only after the user has replied with approval or reviewed content.
+Use `$ARGUMENTS` as an optional knowledgebase `title`. If no non-empty title is provided, ask the user for the title, then call the API to create a minimal knowledgebase shell. Full `description`, `tags`, `scope`, and `outline` are initialized later by `/kbm:knowledgebase-init <knowledgebase-id> <path-or-url>`.
 
 Claude Code flow:
 
-1. Display this Markdown draft shape in Claude Code:
-
-   ```markdown
-   ---
-   title: <title>
-   description: <description>
-   acceptance_criteria: <acceptance criteria>
-   tags: []
-   ---
-
-   <optional reviewed body>
-   ```
-
-2. Ask the user to reply with `approve` to use the draft or with edited Markdown frontmatter and body.
-3. After the user has replied, parse frontmatter fields `title`, `description`, `acceptance_criteria`, `tags`, and the Markdown body.
-4. Ask for explicit approval if the user has not already approved creation.
-5. Call `kb.knowledgebase.create` only with the parsed reviewed content plus `decision: "approve"` and `reviewed_by: "user"`.
+1. Parse `$ARGUMENTS` as `title`; if it is empty, ask for a non-empty `title`.
+2. Call `kb.knowledgebase.create` with `title` and optional `knowledgebase_id`.
+3. Report the created knowledgebase ID and path.
+4. Tell the user the next step is `/kbm:knowledgebase-init <knowledgebase-id> <path-or-url>` with source-like input.
 
 Helper invocation:
 
@@ -32,14 +19,10 @@ Helper invocation:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.knowledgebase.create '<payload-json>' --pretty
 ```
 
-Required approved payload fields:
+Required payload fields:
 
 - `title`
-- `description`
-- `acceptance_criteria`
-- `decision`: `"approve"`
-- `reviewed_by`: `"user"`
 
-Do not call `kb.knowledgebase.create` until the user has replied in Claude Code with approval or reviewed content.
+Do not collect or invent `description`, `scope`, `outline`, or `tags` in this command.
 Do not create or edit knowledgebase files directly.
 After success, report the API's automatic `kb.index.rebuild` result. Do not run a separate rebuild from the command.

@@ -6,7 +6,9 @@ status: pending
 source_refs: []
 note_refs: []
 suggested_tags: []
-suggested_kb_ids: []
+bindto: []
+outline_change_suggestions: []
+summary: Candidate summary
 evidence: []
 relations: []
 review:
@@ -18,7 +20,7 @@ created: YYYY-MM-DDTHH:MM:SS
 updated: YYYY-MM-DDTHH:MM:SS
 ---
 
-## Candidate Knowledge
+## Content
 
 ## Evidence
 
