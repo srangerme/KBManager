@@ -565,7 +565,8 @@ def test_claude_cli_runs_in_workspace_with_bypass_permissions(
 
     assert result == {"title": "Generated", "summary": "Done"}
     assert captured["kwargs"]["cwd"] == tmp_path
-    assert captured["kwargs"]["input"].startswith("Return only JSON")
+    assert captured["kwargs"]["input"].startswith("You are completing a KBManager LLM request.")
+    assert "Return only valid JSON" in captured["kwargs"]["input"]
     assert captured["command"][:4] == [
         "claude",
         "-p",
@@ -652,6 +653,44 @@ def test_claude_text_cli_returns_plain_stdout_and_uses_read_only_prompt(
     assert "What do we know?" in prompt
     assert not prompt.startswith("Return only JSON")
     assert captured["kwargs"]["cwd"] == tmp_path
+
+
+def test_llm_prompt_text_renders_sections_with_priority_rules() -> None:
+    prompt = lark_server._llm_prompt_text(
+        {
+            "id": "llm-1",
+            "purpose": "source_ingest",
+            "output_schema": "source_ingest_result",
+            "output_schema_definition": {"required": ["input_path"]},
+            "prompt": {
+                "sections": [
+                    {
+                        "role": "system",
+                        "name": "kbmanager_system_prompt",
+                        "content": "Do not invent facts.",
+                    },
+                    {
+                        "role": "user",
+                        "name": "current_user_input",
+                        "content": {"input_path": "incoming.md"},
+                    },
+                    {
+                        "role": "schema",
+                        "name": "output_schema",
+                        "content": {"schema": {"required": ["input_path"]}},
+                    },
+                ]
+            },
+        }
+    )
+
+    assert "Follow the `kbmanager_system_prompt` section as the highest-priority instruction" in prompt
+    assert "Return only valid JSON" in prompt
+    assert "## Section: kbmanager_system_prompt (system)" in prompt
+    assert "Do not invent facts." in prompt
+    assert "## Section: current_user_input (user)" in prompt
+    assert '"input_path": "incoming.md"' in prompt
+    assert "output_schema_definition" not in prompt
 
 
 def test_parse_structured_output_accepts_json_fence_with_surrounding_text() -> None:

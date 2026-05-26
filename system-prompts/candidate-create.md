@@ -47,7 +47,14 @@ candidates:
     relations: []
 ```
 
-Use `relations: []` when there is no relation to an existing accepted knowledge object. If a relation exists, use `type` and `target`, where `type` must be one of `agrees`, `conflicts`, `related_to`, or `child_of`, and `target` is an existing accepted knowledge ID such as `knowledge-YYYYMMDD-001`; never leave `target` blank and never point it at a source, note, candidate, or newly drafted candidate. Use only `child_of` for hierarchy, meaning the drafted candidate is a child of the target knowledge.
+Use `relations: []` when there is no relation to an existing accepted knowledge object. If a relation exists, use `type` and `target`, where `type` must be one of:
+
+- `agrees`: the drafted candidate reaches a compatible conclusion or supports the target knowledge.
+- `conflicts`: the drafted candidate is incompatible with or contradicts the target knowledge.
+- `related_to`: the drafted candidate is relevant to the target knowledge but does not clearly agree, conflict, or form a hierarchy.
+- `child_of`: the drafted candidate is a child of the target knowledge in the knowledge hierarchy.
+
+The `target` must be an existing accepted knowledge ID such as `knowledge-YYYYMMDD-001`; never leave `target` blank and never point it at a source, note, candidate, or newly drafted candidate. Use only `child_of` for hierarchy, and include at most one `child_of` relation for each drafted candidate.
 
 ## Constraints
 

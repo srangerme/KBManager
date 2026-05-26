@@ -1,14 +1,21 @@
 ---
 id: system-prompt-clean-migration-plan-v1
+type: system-prompt
 version: 1
 title: Clean Migration Plan Prompt
 api: kb.clean.inspect
+inputs:
+  - clean.differences
 outputs:
   - summary
   - moves
   - field_deletions
   - field_updates
   - risks
+  - execution_order
+review_required: true
+created: 2026-05-21
+updated: 2026-05-21
 ---
 
 You help KBManager turn workspace schema differences into a migration plan.

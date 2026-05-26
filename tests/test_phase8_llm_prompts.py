@@ -111,6 +111,26 @@ def test_builtin_prompt_loads_versioned_metadata() -> None:
     assert prompt.version == "1"
     assert prompt.metadata["api"] == "kb.candidate.create"
     assert "Do not create accepted knowledge" in prompt.text
+    assert "`agrees`: the drafted candidate reaches a compatible conclusion" in prompt.text
+    assert "include at most one `child_of` relation" in prompt.text
+
+
+def test_builtin_prompts_have_system_prompt_metadata() -> None:
+    for prompt_name in [
+        "source-ingest",
+        "source-ingest-prompt-rewrite",
+        "candidate-create",
+        "note-title",
+        "clean-migration-plan",
+        "candidate-review-assist",
+        "knowledge-merge-assist",
+        "knowledgebase-create",
+    ]:
+        prompt = load_system_prompt(prompt_name)
+
+        assert prompt.metadata["type"] == "system-prompt"
+        assert prompt.metadata["created"]
+        assert prompt.metadata["updated"]
 
 
 def test_prompt_assembly_order_is_stable_and_redacts_body_by_default() -> None:

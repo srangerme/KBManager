@@ -1,10 +1,16 @@
 ---
 id: system-prompt-note-title-v1
+type: system-prompt
 version: 1
 title: Note Title Prompt
 api: kb.note.add
+inputs:
+  - note.content
 outputs:
   - title
+review_required: false
+created: 2026-05-21
+updated: 2026-05-21
 ---
 
 You help KBManager prepare a title for a personal note.
