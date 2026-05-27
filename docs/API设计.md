@@ -293,7 +293,7 @@ candidates:
 
 ### `kb.candidate.next_pending`
 
-- 输入：必选 `entrypoint` 和 `dry_run`；可选过滤条件。
+- 输入：必选 `entrypoint` 和 `dry_run`；当前不支持过滤条件。
 - 读取：pending candidate 或 review queue。
 - 写入：无。
 - LLM 辅助：不需要。
@@ -417,7 +417,7 @@ candidates:
 - 读取：note Markdown。
 - 写入：无。
 - LLM 辅助：不需要。
-- 输出：note 路径、frontmatter、正文摘要。
+- 输出：note 路径、frontmatter、完整正文 `body`。
 
 ### `kb.note.deprecate`
 

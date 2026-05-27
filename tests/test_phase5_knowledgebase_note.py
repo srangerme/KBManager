@@ -35,11 +35,15 @@ def _kb_payload() -> dict[str, object]:
 def test_knowledgebase_create_requires_review_then_writes_active_kb_and_outlines(
     tmp_path: Path,
 ) -> None:
-    init_workspace(tmp_path)
+    init_workspace(tmp_path, entrypoint="claude_code", dry_run=False)
 
-    gate = knowledgebase_create(tmp_path, title="Research KB", **_kb_payload()).to_dict()
+    gate = knowledgebase_create(
+        tmp_path, entrypoint="claude_code", dry_run=False, title="Research KB", **_kb_payload()
+    ).to_dict()
     final = knowledgebase_create(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         title="Research KB",
         review={"decision": "approve"},
         **_kb_payload(),
@@ -56,9 +60,11 @@ def test_knowledgebase_create_requires_review_then_writes_active_kb_and_outlines
 
 
 def test_knowledgebase_create_rejects_duplicate_id_and_title(tmp_path: Path) -> None:
-    init_workspace(tmp_path)
+    init_workspace(tmp_path, entrypoint="claude_code", dry_run=False)
     first = knowledgebase_create(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         title="Research KB",
         review={"decision": "approve"},
         **_kb_payload(),
@@ -66,6 +72,8 @@ def test_knowledgebase_create_rejects_duplicate_id_and_title(tmp_path: Path) -> 
 
     duplicate_id = knowledgebase_create(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         title="Other KB",
         knowledgebase_id=first["knowledgebase_id"],
         review={"decision": "approve"},
@@ -73,6 +81,8 @@ def test_knowledgebase_create_rejects_duplicate_id_and_title(tmp_path: Path) -> 
     ).to_dict()
     duplicate_title = knowledgebase_create(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         title="Research KB",
         review={"decision": "approve"},
         **_kb_payload(),
@@ -83,13 +93,21 @@ def test_knowledgebase_create_rejects_duplicate_id_and_title(tmp_path: Path) -> 
 
 
 def test_note_add_get_and_deprecate_moves_without_deleting(tmp_path: Path) -> None:
-    init_workspace(tmp_path)
-    added = note_add(tmp_path, content="A useful note.", title="Note").to_dict()
+    init_workspace(tmp_path, entrypoint="claude_code", dry_run=False)
+    added = note_add(
+        tmp_path, entrypoint="claude_code", dry_run=False, content="A useful note.", title="Note"
+    ).to_dict()
 
-    got = note_get(tmp_path, note_id=added["note_id"]).to_dict()
-    gate = note_deprecate(tmp_path, note_id=added["note_id"], reason="Old.").to_dict()
+    got = note_get(
+        tmp_path, entrypoint="claude_code", dry_run=False, note_id=added["note_id"]
+    ).to_dict()
+    gate = note_deprecate(
+        tmp_path, entrypoint="claude_code", dry_run=False, note_id=added["note_id"], reason="Old."
+    ).to_dict()
     deprecated = note_deprecate(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         note_id=added["note_id"],
         reason="Old.",
         decision="deprecate",
@@ -97,14 +115,17 @@ def test_note_add_get_and_deprecate_moves_without_deleting(tmp_path: Path) -> No
     ).to_dict()
 
     assert got["status"] == "success"
+    assert got["note"]["body"] == "\n## Note\n\nA useful note.\n"
     assert gate["status"] == "needs_review"
     assert deprecated["status"] == "success"
     assert (tmp_path / "notes/deprecated" / f"{added['note_id']}.md").is_file()
 
 
 def test_clean_inspect_reports_current_schema_drift_only(tmp_path: Path) -> None:
-    init_workspace(tmp_path)
-    added = note_add(tmp_path, content="A useful note.", title="Note").to_dict()
+    init_workspace(tmp_path, entrypoint="claude_code", dry_run=False)
+    added = note_add(
+        tmp_path, entrypoint="claude_code", dry_run=False, content="A useful note.", title="Note"
+    ).to_dict()
     document = ObjectRepository(Workspace(tmp_path)).read_markdown(added["path"])
     frontmatter = dict(document.frontmatter)
     frontmatter["unexpected"] = "drift"
@@ -116,7 +137,7 @@ def test_clean_inspect_reports_current_schema_drift_only(tmp_path: Path) -> None
         encoding="utf-8",
     )
 
-    data = clean_inspect(tmp_path).to_dict()
+    data = clean_inspect(tmp_path, entrypoint="claude_code", dry_run=False).to_dict()
 
     assert data["status"] == "needs_llm"
     assert data["differences"][0]["kind"] == "unexpected_fields"

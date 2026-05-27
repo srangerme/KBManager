@@ -21,11 +21,15 @@ def _setup_candidate(
     tmp_path: Path,
     candidate_id: str = "knowledge-20260520-001",
 ) -> tuple[str, str, dict]:
-    init_workspace(tmp_path)
+    init_workspace(tmp_path, entrypoint="claude_code", dry_run=False)
     (tmp_path / "source.md").write_text("# Source\n", encoding="utf-8")
-    first_source = source_add(tmp_path, input_path="source.md").to_dict()
+    first_source = source_add(
+        tmp_path, entrypoint="claude_code", dry_run=False, input_path="source.md"
+    ).to_dict()
     source = source_add(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         input_path="source.md",
         resume_token=first_source["resume"]["token"],
         llm_result={
@@ -54,6 +58,8 @@ def _setup_candidate(
     }
     kb_id = knowledgebase_create(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         review={"decision": "approve"},
         title=kb_title,
         **kb_payload,
@@ -68,9 +74,13 @@ def _setup_candidate(
         ],
         "outline_change_suggestions": [],
     }
-    first_candidate = candidate_create(tmp_path, source_ids=[source_id]).to_dict()
+    first_candidate = candidate_create(
+        tmp_path, entrypoint="claude_code", dry_run=False, source_ids=[source_id]
+    ).to_dict()
     candidate_create(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         source_ids=[source_id],
         resume_token=first_candidate["resume"]["token"],
         llm_result={"candidates": [{"id": candidate_id, **candidate_payload}]},
@@ -81,9 +91,13 @@ def _setup_candidate(
 def test_accept_requires_review_and_promotes_candidate(tmp_path: Path) -> None:
     candidate_id, kb_id, payload = _setup_candidate(tmp_path)
 
-    gate = knowledge_accept(tmp_path, candidate_id=candidate_id).to_dict()
+    gate = knowledge_accept(
+        tmp_path, entrypoint="claude_code", dry_run=False, candidate_id=candidate_id
+    ).to_dict()
     result = knowledge_accept(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         candidate_id=candidate_id,
         decision="accept",
         reviewed_by="user",
@@ -115,6 +129,8 @@ def test_accept_rejects_evidence_not_from_candidate(tmp_path: Path) -> None:
 
     result = knowledge_accept(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         candidate_id=candidate_id,
         decision="accept",
         reviewed_by="user",
@@ -129,10 +145,33 @@ def test_accept_rejects_evidence_not_from_candidate(tmp_path: Path) -> None:
     assert "candidate evidence" in result["errors"][0]["message"]
 
 
+def test_accept_rejects_empty_evidence(tmp_path: Path) -> None:
+    candidate_id, _, payload = _setup_candidate(tmp_path)
+
+    result = knowledge_accept(
+        tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
+        candidate_id=candidate_id,
+        decision="accept",
+        reviewed_by="user",
+        title="Accepted",
+        summary=payload["summary"],
+        content=payload["content"],
+        evidence=[],
+        bindto=payload["bindto"],
+    ).to_dict()
+
+    assert result["status"] == "failed"
+    assert "at least one source" in result["errors"][0]["message"]
+
+
 def test_reject_and_defer_move_candidate(tmp_path: Path) -> None:
     candidate_id, _, _ = _setup_candidate(tmp_path)
     rejected = knowledge_reject(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         candidate_id=candidate_id,
         decision="reject",
         reviewed_by="user",
@@ -144,6 +183,8 @@ def test_reject_and_defer_move_candidate(tmp_path: Path) -> None:
     candidate_id, _, _ = _setup_candidate(tmp_path, candidate_id="knowledge-20260520-002")
     deferred = candidate_defer(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         candidate_id=candidate_id,
         decision="defer",
         reviewed_by="user",
@@ -157,6 +198,8 @@ def test_merge_updates_target_and_rejects_source_candidate(tmp_path: Path) -> No
     target_id, _, payload = _setup_candidate(tmp_path, "knowledge-20260520-001")
     knowledge_accept(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         candidate_id=target_id,
         decision="accept",
         reviewed_by="user",
@@ -170,6 +213,8 @@ def test_merge_updates_target_and_rejects_source_candidate(tmp_path: Path) -> No
 
     result = knowledge_merge(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         candidate_id=candidate_id,
         target_knowledge_id=target_id,
         decision="merge",
@@ -194,6 +239,8 @@ def test_merge_rejects_evidence_that_does_not_reference_source(tmp_path: Path) -
     target_id, _, payload = _setup_candidate(tmp_path, "knowledge-20260520-001")
     knowledge_accept(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         candidate_id=target_id,
         decision="accept",
         reviewed_by="user",
@@ -207,6 +254,8 @@ def test_merge_rejects_evidence_that_does_not_reference_source(tmp_path: Path) -
 
     result = knowledge_merge(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         candidate_id=candidate_id,
         target_knowledge_id=target_id,
         decision="merge",
@@ -214,9 +263,7 @@ def test_merge_rejects_evidence_that_does_not_reference_source(tmp_path: Path) -
         title="Merged",
         summary="Merged summary.",
         content="Merged content.",
-        evidence=[
-            {"source_id": target_id, "locator": "section 1", "quote": "not a source"}
-        ],
+        evidence=[{"source_id": target_id, "locator": "section 1", "quote": "not a source"}],
         bindto=candidate_payload["bindto"],
     ).to_dict()
 
@@ -228,6 +275,8 @@ def test_deprecate_knowledge_records_metadata(tmp_path: Path) -> None:
     candidate_id, _, payload = _setup_candidate(tmp_path)
     knowledge_accept(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         candidate_id=candidate_id,
         decision="accept",
         reviewed_by="user",
@@ -240,6 +289,8 @@ def test_deprecate_knowledge_records_metadata(tmp_path: Path) -> None:
 
     result = knowledge_deprecate(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         knowledge_id=candidate_id,
         decision="deprecate",
         reviewed_by="user",

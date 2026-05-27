@@ -95,6 +95,8 @@ class ApplicationApiClient:
 
     def call(self, operation: str, **kwargs: Any) -> dict[str, Any]:
         function = _APPLICATION_OPERATIONS[operation]
+        kwargs.setdefault("entrypoint", "claude_code")
+        kwargs.setdefault("dry_run", False)
         return function(self.root, **kwargs).to_dict()
 
 
@@ -132,7 +134,9 @@ class LoggedLlmClient:
         except Exception as exc:
             write_llm_log(self.root, purpose=purpose, input_payload=input_payload, error=str(exc))
             raise
-        write_llm_log(self.root, purpose=purpose, input_payload=input_payload, output_payload=result)
+        write_llm_log(
+            self.root, purpose=purpose, input_payload=input_payload, output_payload=result
+        )
         return result
 
 
@@ -316,9 +320,8 @@ class SlashCommandInterface:
         calls: list[ApiCallRecord] = []
         if candidate_id is None:
             next_pending = self._call(calls, "kb.candidate.next_pending")
-            if (
-                next_pending["status"] != ApiStatus.SUCCESS.value
-                or not next_pending.get("candidate")
+            if next_pending["status"] != ApiStatus.SUCCESS.value or not next_pending.get(
+                "candidate"
             ):
                 return self._from_api_result(next_pending, calls, "No pending candidate available.")
             candidate_id = next_pending["candidate"]["id"]
@@ -601,12 +604,12 @@ class SlashCommandInterface:
                 summary="Knowledgebase draft is waiting for user input in Claude Code.",
                 api_calls=calls,
                 requested_in_claude=[
-                        _claude_request(
-                            "reviewed_markdown",
-                            "init_knowledgebase",
-                            "Reply with approve to use the draft, or provide reviewed "
-                            "structured fields.",
-                        )
+                    _claude_request(
+                        "reviewed_markdown",
+                        "init_knowledgebase",
+                        "Reply with approve to use the draft, or provide reviewed "
+                        "structured fields.",
+                    )
                 ],
                 next_actions=["Approve or revise the knowledgebase draft in Claude Code."],
                 extra={"draft": reviewed},
@@ -628,7 +631,7 @@ class SlashCommandInterface:
             return InterfaceResult(
                 status=ApiStatus.NEEDS_REVIEW.value,
                 summary="Knowledgebase index is missing.",
-                next_actions=["Run /kb-check before opening the knowledgebase index."],
+                next_actions=["Run /kbm:ask check before opening the knowledgebase index."],
                 extra={"missing_index": path},
             )
         return InterfaceResult(
@@ -709,7 +712,7 @@ class SlashCommandInterface:
             return InterfaceResult(
                 status=ApiStatus.NEEDS_REVIEW.value,
                 summary="Note index is missing.",
-                next_actions=["Run /kb-check before opening the note index."],
+                next_actions=["Run /kbm:ask check before opening the note index."],
                 extra={"missing_index": path},
             )
         return InterfaceResult(
@@ -981,14 +984,7 @@ def _download_text_context(url: str) -> str:
     if content_type in {"text/html", "application/xhtml+xml"}:
         return text
     if content_type.startswith("text/"):
-        return (
-            "<!doctype html>\n"
-            "<html>\n"
-            "<body>\n"
-            f"<pre>{escape(text)}</pre>\n"
-            "</body>\n"
-            "</html>\n"
-        )
+        return f"<!doctype html>\n<html>\n<body>\n<pre>{escape(text)}</pre>\n</body>\n</html>\n"
     raise ValueError(f"unsupported knowledgebase create URL content type: {content_type}")
 
 
@@ -1034,13 +1030,15 @@ def _validate_llm_output(schema_name: str, result: Any) -> str | None:
             if field not in result:
                 return f"LLM result is missing required field: {field}"
     if schema_name == "knowledge_merge_assist":
-        if not isinstance(result.get("merged_summary"), str) or not result[
-            "merged_summary"
-        ].strip():
+        if (
+            not isinstance(result.get("merged_summary"), str)
+            or not result["merged_summary"].strip()
+        ):
             return "knowledge_merge_assist.merged_summary must be a non-empty string"
-        if not isinstance(result.get("merged_content"), str) or not result[
-            "merged_content"
-        ].strip():
+        if (
+            not isinstance(result.get("merged_content"), str)
+            or not result["merged_content"].strip()
+        ):
             return "knowledge_merge_assist.merged_content must be a non-empty string"
         if not _is_mapping_list(result.get("evidence")):
             return "knowledge_merge_assist.evidence must be a list of mappings"
@@ -1058,13 +1056,15 @@ def _validate_llm_output(schema_name: str, result: Any) -> str | None:
         if not isinstance(result.get("recommendations"), list):
             return "candidate_review_assist.recommendations must be a list"
     if schema_name == "source_ingest_prompt_rewrite":
-        if not isinstance(result.get("rewritten_prompt"), str) or not result[
-            "rewritten_prompt"
-        ].strip():
+        if (
+            not isinstance(result.get("rewritten_prompt"), str)
+            or not result["rewritten_prompt"].strip()
+        ):
             return "source_ingest_prompt_rewrite.rewritten_prompt must be a non-empty string"
-        if not isinstance(result.get("intent_summary"), str) or not result[
-            "intent_summary"
-        ].strip():
+        if (
+            not isinstance(result.get("intent_summary"), str)
+            or not result["intent_summary"].strip()
+        ):
             return "source_ingest_prompt_rewrite.intent_summary must be a non-empty string"
         if not _is_string_list(result.get("constraints")):
             return "source_ingest_prompt_rewrite.constraints must be a list of strings"
@@ -1081,10 +1081,14 @@ def _validate_llm_output(schema_name: str, result: Any) -> str | None:
             return "knowledgebase_create_draft.frontmatter.tags must be a list of strings"
         if not isinstance(frontmatter.get("scope"), dict):
             return "knowledgebase_create_draft.frontmatter.scope must be a mapping"
-        if not isinstance(frontmatter.get("default_outline_id"), str) or not frontmatter[
-            "default_outline_id"
-        ].strip():
-            return "knowledgebase_create_draft.frontmatter.default_outline_id must be a non-empty string"
+        if (
+            not isinstance(frontmatter.get("default_outline_id"), str)
+            or not frontmatter["default_outline_id"].strip()
+        ):
+            return (
+                "knowledgebase_create_draft.frontmatter.default_outline_id "
+                "must be a non-empty string"
+            )
         if not isinstance(frontmatter.get("outlines"), list):
             return "knowledgebase_create_draft.frontmatter.outlines must be a list"
         if not isinstance(result.get("body"), str) or not result["body"].strip():

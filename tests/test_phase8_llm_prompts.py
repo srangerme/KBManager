@@ -16,11 +16,15 @@ def _source_llm_result(input_path: str = "incoming.md") -> dict[str, object]:
 
 
 def _create_source(tmp_path: Path) -> str:
-    init_workspace(tmp_path)
+    init_workspace(tmp_path, entrypoint="claude_code", dry_run=False)
     (tmp_path / "incoming.md").write_text("# Raw\n", encoding="utf-8")
-    first = source_add(tmp_path, input_path="incoming.md").to_dict()
+    first = source_add(
+        tmp_path, entrypoint="claude_code", dry_run=False, input_path="incoming.md"
+    ).to_dict()
     resumed = source_add(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         input_path="incoming.md",
         resume_token=first["resume"]["token"],
         llm_result=_source_llm_result(),
@@ -65,10 +69,14 @@ def test_prompt_assembly_includes_output_schema() -> None:
 
 def test_candidate_llm_output_cannot_create_accepted_knowledge(tmp_path: Path) -> None:
     source_id = _create_source(tmp_path)
-    first = candidate_create(tmp_path, source_ids=[source_id]).to_dict()
+    first = candidate_create(
+        tmp_path, entrypoint="claude_code", dry_run=False, source_ids=[source_id]
+    ).to_dict()
 
     result = candidate_create(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         source_ids=[source_id],
         resume_token=first["resume"]["token"],
         llm_result={
@@ -96,10 +104,14 @@ def test_candidate_llm_output_cannot_create_accepted_knowledge(tmp_path: Path) -
 
 def test_candidate_draft_without_evidence_is_rejected(tmp_path: Path) -> None:
     source_id = _create_source(tmp_path)
-    first = candidate_create(tmp_path, source_ids=[source_id]).to_dict()
+    first = candidate_create(
+        tmp_path, entrypoint="claude_code", dry_run=False, source_ids=[source_id]
+    ).to_dict()
 
     result = candidate_create(
         tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
         source_ids=[source_id],
         resume_token=first["resume"]["token"],
         llm_result={
@@ -124,7 +136,9 @@ def test_candidate_draft_without_evidence_is_rejected(tmp_path: Path) -> None:
 def test_candidate_create_llm_request_includes_source_context(tmp_path: Path) -> None:
     source_id = _create_source(tmp_path)
 
-    first = candidate_create(tmp_path, source_ids=[source_id]).to_dict()
+    first = candidate_create(
+        tmp_path, entrypoint="claude_code", dry_run=False, source_ids=[source_id]
+    ).to_dict()
 
     source_context = first["llm_request"]["prompt"]["sections"][1]["content"]["source_context"]
     assert source_context[0]["id"] == source_id
@@ -150,6 +164,7 @@ def test_interface_rejects_invalid_merge_assist_schema(tmp_path: Path) -> None:
         "Target body.\n",
         encoding="utf-8",
     )
+
     class MockApi:
         def call(self, operation: str, **kwargs: object) -> dict[str, object]:
             return {
@@ -179,12 +194,16 @@ def test_interface_rejects_invalid_merge_assist_schema(tmp_path: Path) -> None:
                 return {"summary": "s", "evidence_review": [], "bindto": [], "recommendations": []}
             return {"merged_body": "old"}
 
-    result = SlashCommandInterface(root=tmp_path, api=MockApi(), llm=MockLlm()).kb_candidate_review(
-        "knowledge-1",
-        decision="merge",
-        merge_targets=["knowledge-2"],
-        reviewed_markdown={"summary": "s", "content": "c", "evidence": [], "bindto": []},
-    ).to_dict()
+    result = (
+        SlashCommandInterface(root=tmp_path, api=MockApi(), llm=MockLlm())
+        .kb_candidate_review(
+            "knowledge-1",
+            decision="merge",
+            merge_targets=["knowledge-2"],
+            reviewed_markdown={"summary": "s", "content": "c", "evidence": [], "bindto": []},
+        )
+        .to_dict()
+    )
 
     assert result["status"] == "failed"
     assert "merged_summary" in result["errors"][0]["message"]

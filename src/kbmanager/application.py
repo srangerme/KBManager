@@ -48,7 +48,6 @@ INDEX_REBUILD_OPERATION = "kb.index.rebuild"
 CLEAN_INSPECT_OPERATION = "kb.clean.inspect"
 
 INIT_DIRECTORIES = (
-    ".lark/logs",
     "data/raw/md",
     "data/raw/pdf",
     "data/raw/html",
@@ -107,22 +106,9 @@ indexes:
     "indexes/review-queue.md": "# Review Queue\n\n",
 }
 INIT_DIRECTORY_PLACEHOLDER_FILES = {
-    f"{directory}/{INIT_DIRECTORY_PLACEHOLDER}": ""
-    for directory in _all_init_directories()
-    if not directory.startswith(".lark")
+    f"{directory}/{INIT_DIRECTORY_PLACEHOLDER}": "" for directory in _all_init_directories()
 }
-LARK_SETTINGS_EXAMPLE = """{
-  "app_id": "cli_xxxxxxxxxxxxxxxx",
-  "app_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-  "remote": "origin",
-  "branch": "main",
-  "ack_only": true
-}
-"""
-INIT_LARK_FILES = {
-    ".lark/settings.json.example": LARK_SETTINGS_EXAMPLE,
-}
-INIT_FILES = {**INIT_INDEX_FILES, **INIT_DIRECTORY_PLACEHOLDER_FILES, **INIT_LARK_FILES}
+INIT_FILES = {**INIT_INDEX_FILES, **INIT_DIRECTORY_PLACEHOLDER_FILES}
 
 
 def system_template_text(name: str) -> str:
@@ -187,6 +173,7 @@ INDEX_MARKDOWN_PATHS = (
     "indexes/review-queue.md",
 )
 INDEX_YAML_PATHS: tuple[str, ...] = ()
+ALLOWED_ENTRYPOINTS = ("claude_code",)
 BINDTO_SHAPE = (
     "bindto must be [] when there are no knowledgebase bindings, or mappings like "
     "{'kb_id': 'kb-YYYYMMDD-001-title', 'outline_id': 'outline-id', "
@@ -200,8 +187,57 @@ EVIDENCE_SHAPE = (
 )
 
 
-def init_workspace(root: str | Path = ".", *, dry_run: bool = False) -> ApiResult:
+def _api_contract_error(
+    operation: str,
+    *,
+    entrypoint: str | None,
+    dry_run: bool | None,
+) -> ApiResult | None:
+    if entrypoint is None:
+        return ApiResult.failed(
+            operation,
+            "missing_entrypoint",
+            f"{operation} requires entrypoint. Allowed entrypoints: claude_code.",
+            'Pass entrypoint="claude_code".',
+        )
+    if entrypoint not in ALLOWED_ENTRYPOINTS:
+        return ApiResult.failed(
+            operation,
+            "unsupported_entrypoint",
+            (
+                f"{operation} does not allow entrypoint {entrypoint!r}. "
+                "Allowed entrypoints: claude_code."
+            ),
+            'Use entrypoint="claude_code".',
+        )
+    if dry_run is None:
+        return ApiResult.failed(
+            operation,
+            "missing_dry_run",
+            f"{operation} requires dry_run to be explicitly true or false.",
+            "Pass dry_run=true to validate or dry_run=false to execute.",
+        )
+    if not isinstance(dry_run, bool):
+        return ApiResult.failed(
+            operation,
+            "invalid_dry_run",
+            f"{operation} requires dry_run to be a boolean.",
+            "Pass dry_run=true or dry_run=false.",
+        )
+    return None
+
+
+def init_workspace(
+    root: str | Path = ".",
+    *,
+    entrypoint: str | None = None,
+    dry_run: bool | None = None,
+) -> ApiResult:
     """Initialize a controlled KBManager workspace."""
+
+    contract_error = _api_contract_error(INIT_OPERATION, entrypoint=entrypoint, dry_run=dry_run)
+    if contract_error is not None:
+        return contract_error
 
     try:
         workspace = Workspace(root)
@@ -242,8 +278,6 @@ def init_workspace(root: str | Path = ".", *, dry_run: bool = False) -> ApiResul
         for relative_path in plan.create_files:
             path = workspace.resolve(relative_path)
             _write_new_text_atomic(path, INIT_FILES[relative_path])
-            if relative_path == "run_lark_server.py":
-                path.chmod(0o755)
             created_paths.append(path)
     except (OSError, KBManagerError) as exc:
         _rollback_created(created_paths)
@@ -266,15 +300,24 @@ def init_workspace(root: str | Path = ".", *, dry_run: bool = False) -> ApiResul
 def source_add(
     root: str | Path = ".",
     *,
+    entrypoint: str | None = None,
     input_path: str | Path,
     title: str | None = None,
     tags: list[str] | None = None,
     authors: list[str] | None = None,
     resume_token: str | None = None,
     llm_result: dict[str, Any] | None = None,
-    dry_run: bool = False,
+    dry_run: bool | None = None,
 ) -> ApiResult:
     """Add a local Markdown/PDF source through the source-ingest LLM boundary."""
+
+    contract_error = _api_contract_error(
+        SOURCE_ADD_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     input_text = str(input_path)
     try:
@@ -282,9 +325,7 @@ def source_add(
         _validate_source_add_input(title=title, tags=tags, authors=authors)
         source_inputs = _source_inputs(workspace, input_path)
         input_ref = (
-            str(input_path)
-            if _is_supported_source_url(input_text)
-            else str(Path(input_path))
+            str(input_path) if _is_supported_source_url(input_text) else str(Path(input_path))
         )
         token_payload = {
             "input_path": input_ref,
@@ -400,13 +441,22 @@ def source_add(
 def source_deprecate(
     root: str | Path = ".",
     *,
+    entrypoint: str | None = None,
     source_id: str,
     decision: str | None = None,
     reviewed_by: str | None = None,
     reason: str | None = None,
-    dry_run: bool = False,
+    dry_run: bool | None = None,
 ) -> ApiResult:
     """Mark a source as deprecated after user review."""
+
+    contract_error = _api_contract_error(
+        SOURCE_DEPRECATE_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     if not _has_review_decision(decision, reviewed_by, "deprecate"):
         return _needs_review(SOURCE_DEPRECATE_OPERATION, ["deprecate", "revise"])
@@ -467,12 +517,21 @@ def source_deprecate(
 def candidate_create(
     root: str | Path = ".",
     *,
+    entrypoint: str | None = None,
     source_ids: list[str] | None = None,
     resume_token: str | None = None,
     llm_result: dict[str, Any] | None = None,
-    dry_run: bool = False,
+    dry_run: bool | None = None,
 ) -> ApiResult:
     """Create pending candidates through the candidate-create LLM boundary."""
+
+    contract_error = _api_contract_error(
+        CANDIDATE_CREATE_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     source_ids = source_ids or []
     token_payload = {"source_ids": source_ids}
@@ -563,8 +622,22 @@ def candidate_create(
     )
 
 
-def candidate_get(root: str | Path = ".", *, candidate_id: str) -> ApiResult:
+def candidate_get(
+    root: str | Path = ".",
+    *,
+    entrypoint: str | None = None,
+    candidate_id: str,
+    dry_run: bool | None = None,
+) -> ApiResult:
     """Return a candidate object and its referenced object summaries."""
+
+    contract_error = _api_contract_error(
+        CANDIDATE_GET_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     try:
         workspace = Workspace(root)
@@ -595,8 +668,21 @@ def candidate_get(root: str | Path = ".", *, candidate_id: str) -> ApiResult:
     )
 
 
-def candidate_next_pending(root: str | Path = ".") -> ApiResult:
+def candidate_next_pending(
+    root: str | Path = ".",
+    *,
+    entrypoint: str | None = None,
+    dry_run: bool | None = None,
+) -> ApiResult:
     """Return the oldest pending candidate."""
+
+    contract_error = _api_contract_error(
+        CANDIDATE_NEXT_PENDING_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     try:
         workspace = Workspace(root)
@@ -629,7 +715,12 @@ def candidate_next_pending(root: str | Path = ".") -> ApiResult:
             "Fix invalid candidate files and try again.",
         )
 
-    result = candidate_get(workspace.root, candidate_id=pending[0].object_id).to_dict()
+    result = candidate_get(
+        workspace.root,
+        entrypoint="claude_code",
+        candidate_id=pending[0].object_id,
+        dry_run=False,
+    ).to_dict()
     return ApiResult.success(
         CANDIDATE_NEXT_PENDING_OPERATION,
         extra={"candidate": result["candidate"]},
@@ -639,6 +730,7 @@ def candidate_next_pending(root: str | Path = ".") -> ApiResult:
 def knowledge_accept(
     root: str | Path = ".",
     *,
+    entrypoint: str | None = None,
     candidate_id: str,
     decision: str | None = None,
     reviewed_by: str | None = None,
@@ -648,9 +740,17 @@ def knowledge_accept(
     content: str | None = None,
     evidence: list[dict[str, Any]] | None = None,
     bindto: list[dict[str, Any]] | None = None,
-    dry_run: bool = False,
+    dry_run: bool | None = None,
 ) -> ApiResult:
     """Promote a pending candidate to accepted knowledge after user review."""
+
+    contract_error = _api_contract_error(
+        KNOWLEDGE_ACCEPT_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     if not _has_review_decision(decision, reviewed_by, "accept"):
         return _needs_review(KNOWLEDGE_ACCEPT_OPERATION, ["accept", "reject", "defer", "merge"])
@@ -737,13 +837,22 @@ def knowledge_accept(
 def knowledge_reject(
     root: str | Path = ".",
     *,
+    entrypoint: str | None = None,
     candidate_id: str,
     decision: str | None = None,
     reviewed_by: str | None = None,
     reason: str | None = None,
-    dry_run: bool = False,
+    dry_run: bool | None = None,
 ) -> ApiResult:
     """Reject a candidate after user review."""
+
+    contract_error = _api_contract_error(
+        KNOWLEDGE_REJECT_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     if not _has_review_decision(decision, reviewed_by, "reject"):
         return _needs_review(KNOWLEDGE_REJECT_OPERATION, ["reject", "revise"])
@@ -755,20 +864,29 @@ def knowledge_reject(
         decision="reject",
         reviewed_by=reviewed_by,
         reason=reason,
-        dry_run=dry_run,
+        dry_run=bool(dry_run),
     )
 
 
 def candidate_defer(
     root: str | Path = ".",
     *,
+    entrypoint: str | None = None,
     candidate_id: str,
     decision: str | None = None,
     reviewed_by: str | None = None,
     reason: str | None = None,
-    dry_run: bool = False,
+    dry_run: bool | None = None,
 ) -> ApiResult:
     """Defer a pending candidate after user review."""
+
+    contract_error = _api_contract_error(
+        CANDIDATE_DEFER_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     if not _has_review_decision(decision, reviewed_by, "defer"):
         return _needs_review(CANDIDATE_DEFER_OPERATION, ["defer", "accept", "reject"])
@@ -780,13 +898,14 @@ def candidate_defer(
         decision="defer",
         reviewed_by=reviewed_by,
         reason=reason,
-        dry_run=dry_run,
+        dry_run=bool(dry_run),
     )
 
 
 def knowledge_merge(
     root: str | Path = ".",
     *,
+    entrypoint: str | None = None,
     candidate_id: str,
     target_knowledge_id: str,
     decision: str | None = None,
@@ -797,9 +916,17 @@ def knowledge_merge(
     content: str | None = None,
     evidence: list[dict[str, Any]] | None = None,
     bindto: list[dict[str, Any]] | None = None,
-    dry_run: bool = False,
+    dry_run: bool | None = None,
 ) -> ApiResult:
     """Merge a reviewed candidate into an existing knowledge object."""
+
+    contract_error = _api_contract_error(
+        KNOWLEDGE_MERGE_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     if not _has_review_decision(decision, reviewed_by, "merge"):
         return _needs_review(KNOWLEDGE_MERGE_OPERATION, ["merge", "reject", "revise"])
@@ -912,13 +1039,22 @@ def knowledge_merge(
 def knowledge_deprecate(
     root: str | Path = ".",
     *,
+    entrypoint: str | None = None,
     knowledge_id: str,
     decision: str | None = None,
     reviewed_by: str | None = None,
     reason: str | None = None,
-    dry_run: bool = False,
+    dry_run: bool | None = None,
 ) -> ApiResult:
     """Mark accepted knowledge as deprecated after user review."""
+
+    contract_error = _api_contract_error(
+        KNOWLEDGE_DEPRECATE_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     if not _has_review_decision(decision, reviewed_by, "deprecate"):
         return _needs_review(KNOWLEDGE_DEPRECATE_OPERATION, ["deprecate", "revise"])
@@ -977,6 +1113,7 @@ def knowledge_deprecate(
 def knowledgebase_create(
     root: str | Path = ".",
     *,
+    entrypoint: str | None = None,
     title: str,
     description: str | None = None,
     tags: list[str] | None = None,
@@ -986,9 +1123,17 @@ def knowledgebase_create(
     review: dict[str, Any] | None = None,
     reviewed_by: str | None = None,
     knowledgebase_id: str | None = None,
-    dry_run: bool = False,
+    dry_run: bool | None = None,
 ) -> ApiResult:
     """Create a reviewed active knowledge base and its outline YAML file."""
+
+    contract_error = _api_contract_error(
+        KNOWLEDGEBASE_CREATE_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     if not _review_approved(review):
         return _needs_review(KNOWLEDGEBASE_CREATE_OPERATION, ["approve", "revise", "reject"])
@@ -1017,7 +1162,9 @@ def knowledgebase_create(
         if workspace.resolve(relative_path).exists():
             raise RepositoryError(f"knowledge base path already exists: {relative_path}")
         if workspace.resolve(outlines_relative_path).exists():
-            raise RepositoryError(f"knowledgebase outlines file already exists: {outlines_relative_path}")
+            raise RepositoryError(
+                f"knowledgebase outlines file already exists: {outlines_relative_path}"
+            )
         outline_document = _outlines_document(
             kb_id,
             payload["default_outline_id"],
@@ -1086,15 +1233,26 @@ def knowledgebase_create(
 def knowledgebase_outline_create(
     root: str | Path = ".",
     *,
+    entrypoint: str | None = None,
     knowledgebase_id: str,
     outline: dict[str, Any],
     review: dict[str, Any] | None = None,
-    dry_run: bool = False,
+    dry_run: bool | None = None,
 ) -> ApiResult:
     """Create a new outline for an active knowledge base."""
 
+    contract_error = _api_contract_error(
+        KNOWLEDGEBASE_OUTLINE_CREATE_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
+
     if not _review_approved(review):
-        return _needs_review(KNOWLEDGEBASE_OUTLINE_CREATE_OPERATION, ["approve", "revise", "reject"])
+        return _needs_review(
+            KNOWLEDGEBASE_OUTLINE_CREATE_OPERATION, ["approve", "revise", "reject"]
+        )
     try:
         workspace = Workspace(root)
         repository = ObjectRepository(workspace)
@@ -1173,12 +1331,21 @@ def knowledgebase_outline_create(
 def knowledgebase_outline_set_default(
     root: str | Path = ".",
     *,
+    entrypoint: str | None = None,
     knowledgebase_id: str,
     outline_id: str,
     review: dict[str, Any] | None = None,
-    dry_run: bool = False,
+    dry_run: bool | None = None,
 ) -> ApiResult:
     """Set the default outline for an active knowledge base."""
+
+    contract_error = _api_contract_error(
+        KNOWLEDGEBASE_OUTLINE_SET_DEFAULT_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     if not _review_approved(review):
         return _needs_review(
@@ -1188,7 +1355,9 @@ def knowledgebase_outline_set_default(
     try:
         workspace = Workspace(root)
         repository = ObjectRepository(workspace)
-        kb_record = _find_single_object(repository, knowledgebase_id, expected_type="knowledge-base")
+        kb_record = _find_single_object(
+            repository, knowledgebase_id, expected_type="knowledge-base"
+        )
         if kb_record.status != "active":
             raise RepositoryError(f"knowledgebase must be active: {knowledgebase_id}")
         document = repository.read_markdown(workspace.relative(kb_record.path))
@@ -1242,13 +1411,22 @@ def knowledgebase_outline_set_default(
 def knowledgebase_outline_archive(
     root: str | Path = ".",
     *,
+    entrypoint: str | None = None,
     knowledgebase_id: str,
     outline_id: str,
     review: dict[str, Any] | None = None,
     allow_existing_bindings: bool = False,
-    dry_run: bool = False,
+    dry_run: bool | None = None,
 ) -> ApiResult:
     """Archive a non-default outline."""
+
+    contract_error = _api_contract_error(
+        KNOWLEDGEBASE_OUTLINE_ARCHIVE_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     if not _review_approved(review):
         return _needs_review(
@@ -1258,7 +1436,9 @@ def knowledgebase_outline_archive(
     try:
         workspace = Workspace(root)
         repository = ObjectRepository(workspace)
-        kb_record = _find_single_object(repository, knowledgebase_id, expected_type="knowledge-base")
+        kb_record = _find_single_object(
+            repository, knowledgebase_id, expected_type="knowledge-base"
+        )
         if kb_record.status != "active":
             raise RepositoryError(f"knowledgebase must be active: {knowledgebase_id}")
         document = repository.read_markdown(workspace.relative(kb_record.path))
@@ -1327,10 +1507,20 @@ def knowledgebase_outline_archive(
 def knowledgebase_map(
     root: str | Path = ".",
     *,
+    entrypoint: str | None = None,
     knowledgebase_id: str | None = None,
     output_path: str | Path | None = None,
+    dry_run: bool | None = None,
 ) -> ApiResult:
     """Generate a temporary Mermaid knowledge hierarchy map."""
+
+    contract_error = _api_contract_error(
+        KNOWLEDGEBASE_MAP_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     try:
         workspace = Workspace(root)
@@ -1338,8 +1528,9 @@ def knowledgebase_map(
         records = _all_records(repository)
         markdown, issues = _knowledgebase_map_markdown(records, workspace, knowledgebase_id)
         target = Path(output_path) if output_path is not None else _temporary_map_path()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(markdown, encoding="utf-8")
+        if not dry_run:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(markdown, encoding="utf-8")
     except (KBManagerError, OSError) as exc:
         return _failed(
             KNOWLEDGEBASE_MAP_OPERATION,
@@ -1363,15 +1554,24 @@ def knowledgebase_map(
 def note_add(
     root: str | Path = ".",
     *,
+    entrypoint: str | None = None,
     content: str,
     title: str | None = None,
     note_id: str | None = None,
     needs_llm: bool = False,
     resume_token: str | None = None,
     llm_result: dict[str, Any] | None = None,
-    dry_run: bool = False,
+    dry_run: bool | None = None,
 ) -> ApiResult:
     """Add an active note."""
+
+    contract_error = _api_contract_error(
+        NOTE_ADD_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     try:
         llm_note: dict[str, Any] = {}
@@ -1456,8 +1656,22 @@ def note_add(
     )
 
 
-def note_get(root: str | Path = ".", *, note_id: str) -> ApiResult:
+def note_get(
+    root: str | Path = ".",
+    *,
+    entrypoint: str | None = None,
+    note_id: str,
+    dry_run: bool | None = None,
+) -> ApiResult:
     """Return a note object by ID."""
+
+    contract_error = _api_contract_error(
+        NOTE_GET_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     try:
         workspace = Workspace(root)
@@ -1482,13 +1696,22 @@ def note_get(root: str | Path = ".", *, note_id: str) -> ApiResult:
 def note_deprecate(
     root: str | Path = ".",
     *,
+    entrypoint: str | None = None,
     note_id: str,
     reason: str | None = None,
     decision: str | None = None,
     reviewed_by: str | None = None,
-    dry_run: bool = False,
+    dry_run: bool | None = None,
 ) -> ApiResult:
     """Mark a note deprecated and move it to notes/deprecated."""
+
+    contract_error = _api_contract_error(
+        NOTE_DEPRECATE_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     if not _has_review_decision(decision, reviewed_by, "deprecate"):
         return _needs_review(NOTE_DEPRECATE_OPERATION, ["deprecate", "revise"])
@@ -1555,8 +1778,21 @@ def note_deprecate(
     )
 
 
-def clean_inspect(root: str | Path = ".") -> ApiResult:
+def clean_inspect(
+    root: str | Path = ".",
+    *,
+    entrypoint: str | None = None,
+    dry_run: bool | None = None,
+) -> ApiResult:
     """Inspect workspace drift from the current object layout and schema."""
+
+    contract_error = _api_contract_error(
+        CLEAN_INSPECT_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     try:
         workspace = Workspace(root)
@@ -1613,11 +1849,20 @@ def clean_inspect(root: str | Path = ".") -> ApiResult:
 def index_rebuild(
     root: str | Path = ".",
     *,
+    entrypoint: str | None = None,
     scope: str = "all",
     object_id: str | None = None,
-    dry_run: bool = False,
+    dry_run: bool | None = None,
 ) -> ApiResult:
     """Rebuild derived indexes from object files and report consistency issues."""
+
+    contract_error = _api_contract_error(
+        INDEX_REBUILD_OPERATION,
+        entrypoint=entrypoint,
+        dry_run=dry_run,
+    )
+    if contract_error is not None:
+        return contract_error
 
     try:
         workspace = Workspace(root)
@@ -1723,7 +1968,7 @@ def _knowledgebase_map_markdown(
         lines.append('  empty["No active knowledgebase"]')
     for kb_record in knowledgebases:
         kb_node = _mermaid_node_id(kb_record.object_id)
-        lines.append(f"  {kb_node}[\"{_mermaid_label(kb_record)}\"]")
+        lines.append(f'  {kb_node}["{_mermaid_label(kb_record)}"]')
         outlines_document = _read_outlines_file(workspace, kb_record)
         default_outline_id = kb_record.metadata.get("default_outline_id")
         outline = _outline_by_id(outlines_document, str(default_outline_id))
@@ -1731,10 +1976,9 @@ def _knowledgebase_map_markdown(
         for node_id, label, parent_id in outline_nodes:
             outline_node = _mermaid_node_id(f"{kb_record.object_id}-{node_id}")
             label_text = (
-                f"{escape(label, quote=True)}<br/><code>"
-                f"{escape(node_id, quote=True)}</code>"
+                f"{escape(label, quote=True)}<br/><code>{escape(node_id, quote=True)}</code>"
             )
-            lines.append(f"  {outline_node}[\"{label_text}\"]")
+            lines.append(f'  {outline_node}["{label_text}"]')
             parent_node = (
                 kb_node
                 if parent_id is None
@@ -1746,12 +1990,10 @@ def _knowledgebase_map_markdown(
                 if not isinstance(binding, dict) or binding.get("kb_id") != kb_record.object_id:
                     continue
                 knowledge_node = _mermaid_node_id(knowledge_record.object_id)
-                lines.append(f"  {knowledge_node}[\"{_mermaid_label(knowledge_record)}\"]")
+                lines.append(f'  {knowledge_node}["{_mermaid_label(knowledge_record)}"]')
                 if binding.get("outline_id") != default_outline_id:
                     continue
-                outline_node = _mermaid_node_id(
-                    f"{kb_record.object_id}-{binding.get('node_id')}"
-                )
+                outline_node = _mermaid_node_id(f"{kb_record.object_id}-{binding.get('node_id')}")
                 lines.append(f"  {outline_node} --> {knowledge_node}")
     lines.extend(["```", ""])
     if issues:
@@ -2026,9 +2268,7 @@ def _bound_knowledge_ids_for_base(
 ) -> list[str]:
     bound_ids: set[str] = set()
     for record in knowledge:
-        if kb_record.object_id in _knowledgebase_ids_from_bindto(
-            record.metadata.get("bindto", [])
-        ):
+        if kb_record.object_id in _knowledgebase_ids_from_bindto(record.metadata.get("bindto", [])):
             bound_ids.add(record.object_id)
     return sorted(bound_ids)
 
@@ -2164,8 +2404,7 @@ def _append_reference_issues(
     by_id: dict[str, list[ObjectRecord]],
     issues: list[dict[str, str]],
 ) -> None:
-    field_types = {
-    }
+    field_types = {}
     for field_name, expected_type in field_types.items():
         for target_id in _string_items(record.metadata.get(field_name, [])):
             _append_missing_or_type_issue(
@@ -2183,6 +2422,7 @@ def _append_reference_issues(
         target_id = evidence.get("source_id") or evidence.get("object_id") or evidence.get("id")
         if isinstance(target_id, str):
             _append_missing_reference_issue(record, "evidence", target_id, by_id, issues)
+
 
 def _bindto_consistency_issues(
     knowledgebases: list[ObjectRecord],
@@ -2287,7 +2527,10 @@ def _bindto_consistency_issues(
                         "object_id": record.object_id,
                         "field": "bindto",
                         "target_id": outline_id,
-                        "message": f"{record.object_id}.bindto references archived outline {outline_id}",
+                        "message": (
+                            f"{record.object_id}.bindto references archived outline "
+                            f"{outline_id}"
+                        ),
                     }
                 )
             if node_id not in _outline_node_ids(outline.get("nodes", [])):
@@ -2481,6 +2724,8 @@ def _validate_required_accept_content(
             "accept requires reviewed title, summary, content, evidence, and bindto; "
             "pass bindto as [] or binding mappings"
         )
+    if not evidence:
+        raise RepositoryError("accept evidence must reference at least one source")
 
 
 def _validate_required_merge_content(
@@ -2871,7 +3116,11 @@ def _read_outlines_file(workspace: Workspace, record: ObjectRecord) -> dict[str,
     manifest = _outline_manifest(outlines)
     if manifest != record.metadata.get("outlines"):
         raise RepositoryError(f"outline manifest mismatch for {record.object_id}")
-    return {"kb_id": record.object_id, "default_outline_id": default_outline_id, "outlines": outlines}
+    return {
+        "kb_id": record.object_id,
+        "default_outline_id": default_outline_id,
+        "outlines": outlines,
+    }
 
 
 def _write_yaml_file(
@@ -3384,9 +3633,7 @@ def _clean_object_schemas() -> dict[str, dict[str, set[str]]]:
         },
         "note": {
             "required": object_fields | {"deprecated_at", "deprecated_reason"},
-            "allowed": object_fields
-            | review_fields
-            | {"deprecated_at", "deprecated_reason"},
+            "allowed": object_fields | review_fields | {"deprecated_at", "deprecated_reason"},
         },
     }
 
@@ -3492,11 +3739,9 @@ def _success_with_index_rebuild(
     next_actions: list[str] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> ApiResult:
-    rebuild = index_rebuild(root)
+    rebuild = index_rebuild(root, entrypoint="claude_code", dry_run=False)
     rebuild_data = rebuild.to_dict()
-    rebuild_diffs = [
-        diff for diff in rebuild.diffs if diff.get("action") in {"create", "update"}
-    ]
+    rebuild_diffs = [diff for diff in rebuild.diffs if diff.get("action") in {"create", "update"}]
     merged_objects = ObjectChanges(
         created=objects.created,
         updated=objects.updated + rebuild.objects.updated,
@@ -3804,9 +4049,7 @@ def _download_url_as_pdf_to_path(url: str, target: Path) -> Path:
                 browser.close()
     except (PlaywrightError, OSError) as exc:
         target.unlink(missing_ok=True)
-        raise RepositoryError(
-            f"could not export URL as PDF with Playwright: {url}: {exc}"
-        ) from exc
+        raise RepositoryError(f"could not export URL as PDF with Playwright: {url}: {exc}") from exc
 
     if not target.exists() or target.stat().st_size == 0:
         target.unlink(missing_ok=True)
@@ -4129,9 +4372,7 @@ def _validate_candidate_llm_result(result: dict[str, Any] | None) -> list[dict[s
         )
     drafts = result.get("candidates")
     if not isinstance(drafts, list) or not drafts:
-        raise RepositoryError(
-            "llm_result.candidates must be a non-empty list of candidate drafts"
-        )
+        raise RepositoryError("llm_result.candidates must be a non-empty list of candidate drafts")
     for draft in drafts:
         if not isinstance(draft, dict):
             raise RepositoryError(
@@ -4333,8 +4574,7 @@ def _validate_evidence_references_sources(
         record = _find_single_object(repository, source_id)
         if record.object_type != "source":
             raise RepositoryError(
-                f"evidence must reference source objects only; {source_id} is "
-                f"{record.object_type}"
+                f"evidence must reference source objects only; {source_id} is {record.object_type}"
             )
     return source_ids
 
@@ -4366,9 +4606,13 @@ def _validate_bindto(
         outlines_document = _read_outlines_file(repository.workspace, record)
         outline = _outline_by_id(outlines_document, outline_id)
         if outline.get("status") != "active":
-            raise RepositoryError(f"bindto.outline_id must reference an active outline: {outline_id}")
+            raise RepositoryError(
+                f"bindto.outline_id must reference an active outline: {outline_id}"
+            )
         if node_id not in _outline_node_ids(outline.get("nodes", [])):
-            raise RepositoryError(f"bindto.node_id does not exist in {kb_id}/{outline_id}: {node_id}")
+            raise RepositoryError(
+                f"bindto.node_id does not exist in {kb_id}/{outline_id}: {node_id}"
+            )
 
 
 def _candidate_reference_summaries(

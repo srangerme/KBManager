@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import sysconfig
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,10 @@ import yaml
 from kbmanager.errors import RepositoryError
 from kbmanager.repository import ObjectRepository
 
-SYSTEM_PROMPTS_DIR = Path(__file__).resolve().parents[2] / "system-prompts"
+SOURCE_SYSTEM_PROMPTS_DIR = Path(__file__).resolve().parents[2] / "system-prompts"
+INSTALLED_SYSTEM_PROMPTS_DIR = (
+    Path(sysconfig.get_path("data")) / "share" / "kbmanager" / "system-prompts"
+)
 
 PROMPT_BY_PURPOSE = {
     "source_ingest": "source-ingest",
@@ -66,7 +70,9 @@ OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
                     "source_refs": "list[string]",
                     "evidence": "list[{source_id|object_id|id, locator, quote|excerpt|snippet}]",
                     "bindto": "list[{kb_id, outline_id, node_id, reason}] or []",
-                    "outline_change_suggestions": "list[{kb_id, outline_id|null, reason, suggested_change}] or []",
+                    "outline_change_suggestions": (
+                        "list[{kb_id, outline_id|null, reason, suggested_change}] or []"
+                    ),
                 }
             ]
         },
@@ -129,8 +135,8 @@ class SystemPrompt:
 def load_system_prompt(name: str) -> SystemPrompt:
     if "/" in name or "\\" in name or name.startswith("."):
         raise RepositoryError(f"invalid system prompt name: {name}")
-    path = SYSTEM_PROMPTS_DIR / f"{name}.md"
-    if not path.is_file():
+    path = _system_prompt_path(name)
+    if path is None:
         raise RepositoryError(f"system prompt not found: {name}")
 
     text = path.read_text(encoding="utf-8")
@@ -144,6 +150,14 @@ def load_system_prompt(name: str) -> SystemPrompt:
         text=document.body.lstrip(),
         metadata=dict(document.frontmatter),
     )
+
+
+def _system_prompt_path(name: str) -> Path | None:
+    for directory in (SOURCE_SYSTEM_PROMPTS_DIR, INSTALLED_SYSTEM_PROMPTS_DIR):
+        path = directory / f"{name}.md"
+        if path.is_file():
+            return path
+    return None
 
 
 def prompt_name_for_purpose(purpose: str) -> str:
