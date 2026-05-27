@@ -482,6 +482,7 @@ def candidate_create(
         repository = ObjectRepository(workspace)
         upstream = _validate_source_refs(repository, source_ids)
         active_kbs = _active_knowledgebase_context(repository)
+        source_context = _candidate_source_context(repository, upstream)
         warnings = _deprecated_source_warnings(upstream)
     except (KBManagerError, OSError) as exc:
         return _failed(
@@ -504,13 +505,21 @@ def candidate_create(
                 "must_not_create_accepted_knowledge",
                 "must_use_existing_outline_id_and_node_id_for_bindto",
             ],
-            token_payload={**token_payload, "active_knowledgebases": active_kbs},
+            token_payload={
+                **token_payload,
+                "active_knowledgebases": active_kbs,
+                "source_context": source_context,
+            },
             warnings=warnings,
         )
 
     if resume_token != _resume_token(
         CANDIDATE_CREATE_OPERATION,
-        {**token_payload, "active_knowledgebases": active_kbs},
+        {
+            **token_payload,
+            "active_knowledgebases": active_kbs,
+            "source_context": source_context,
+        },
     ):
         return _failed(
             CANDIDATE_CREATE_OPERATION,
@@ -3009,6 +3018,54 @@ def _active_knowledgebase_context(repository: ObjectRepository) -> list[dict[str
     return context
 
 
+def _candidate_source_context(
+    repository: ObjectRepository,
+    records: list[ObjectRecord],
+) -> list[dict[str, Any]]:
+    context: list[dict[str, Any]] = []
+    workspace = repository.workspace
+    for record in records:
+        metadata = dict(record.metadata)
+        source_item: dict[str, Any] = {
+            "id": record.object_id,
+            "path": str(workspace.relative(record.path)),
+            "status": record.status,
+            "source_type": metadata.get("source_type"),
+            "title": metadata.get("title"),
+            "summary": metadata.get("summary"),
+            "tags": metadata.get("tags", []),
+            "source_url": metadata.get("source_url"),
+            "cleaned": metadata.get("cleaned", {}),
+        }
+        cleaned_path = _cleaned_path_from_source_metadata(metadata)
+        if cleaned_path is not None:
+            source_item["cleaned_path"] = cleaned_path
+            source_item["cleaned_content"] = _read_optional_workspace_text(workspace, cleaned_path)
+        if record.path.suffix.lower() == ".md":
+            try:
+                document = repository.read_markdown(workspace.relative(record.path))
+            except RepositoryError:
+                document = None
+            if document is not None:
+                source_item["source_body"] = document.body
+        context.append(source_item)
+    return context
+
+
+def _cleaned_path_from_source_metadata(metadata: dict[str, Any]) -> str | None:
+    cleaned = metadata.get("cleaned")
+    if isinstance(cleaned, dict) and isinstance(cleaned.get("path"), str):
+        return cleaned["path"]
+    return None
+
+
+def _read_optional_workspace_text(workspace: Workspace, relative_path: str) -> str:
+    try:
+        return workspace.resolve(relative_path).read_text(encoding="utf-8")
+    except OSError as exc:
+        return f"<unreadable: {exc}>"
+
+
 def _validate_outline_change_suggestions(
     repository: ObjectRepository,
     suggestions: list[dict[str, Any]],
@@ -3652,8 +3709,9 @@ def _title_hint_for_url(value: str) -> str:
 def _source_add_input_failure_recovery(input_text: str) -> tuple[str, list[str]]:
     if not _is_supported_source_url(input_text):
         return (
-            "Provide a readable .md or .pdf file inside the workspace, "
-            "or an accessible HTTP(S) URL.",
+            "Provide a readable .md or .pdf file from the local filesystem, "
+            "or an accessible HTTP(S) URL. KBManager writes managed objects only "
+            "inside the workspace.",
             [],
         )
     return (
@@ -3663,7 +3721,7 @@ def _source_add_input_failure_recovery(input_text: str) -> tuple[str, list[str]]
         [
             "Review the matching report under data/failed.",
             "If you still need this page, manually export/print/save it as PDF.",
-            "Store the captured file inside the workspace and retry kb.source.add with its path.",
+            "Retry kb.source.add with the captured local file path.",
         ],
     )
 

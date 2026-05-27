@@ -9,13 +9,19 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
+from html import escape
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 import kbmanager.application as application
 from kbmanager.contracts import ApiStatus
 from kbmanager.prompts import assemble_prompt, schema_for_output
 from kbmanager.repository import ObjectRepository
+from kbmanager.workspace import Workspace
+
+MAX_KNOWLEDGEBASE_INPUT_BYTES = 5 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -408,11 +414,21 @@ class SlashCommandInterface:
                         }
                     ],
                 )
+            try:
+                target_knowledge = _knowledge_payload(self.root, merge_targets[0])
+            except (OSError, ValueError) as exc:
+                return InterfaceResult(
+                    status=ApiStatus.FAILED.value,
+                    summary="Merge review target knowledge lookup failed.",
+                    api_calls=calls,
+                    displayed_in_claude=displayed,
+                    errors=[{"code": "target_knowledge_not_found", "message": str(exc)}],
+                )
             merge_assist = self.llm.complete(
                 purpose="knowledge_merge_assist",
                 context={
                     "candidate": candidate_payload,
-                    "target_knowledge_id": merge_targets[0],
+                    "target_knowledge": target_knowledge,
                 },
                 prompt=assemble_prompt(
                     system_prompt="knowledge-merge-assist",
@@ -423,7 +439,8 @@ class SlashCommandInterface:
                     },
                     object_context={
                         "candidate": candidate_payload,
-                        "target_knowledge_id": merge_targets[0],
+                        "target_knowledge": target_knowledge,
+                        "include_object_body": True,
                     },
                     output_schema="knowledge_merge_assist",
                     constraints=["proposal_only", "final_payload_must_be_user_reviewed"],
@@ -518,11 +535,13 @@ class SlashCommandInterface:
         approve: bool = False,
     ) -> InterfaceResult:
         calls: list[ApiCallRecord] = []
-        init_llm_result = init_llm_result or self._complete_llm(
-            "knowledgebase_create",
-            None,
-            {"title": title, "input_path": str(input_path)},
-        )
+        if init_llm_result is None:
+            llm_request = _knowledgebase_create_llm_request(self.root, title, input_path)
+            init_llm_result = self._complete_llm(
+                "knowledgebase_create",
+                llm_request,
+                {"title": title, "input_path": str(input_path)},
+            )
         reviewed = _knowledgebase_review_payload(reviewed_markdown, init_llm_result)
         review = {"decision": "approve", "reviewed_by": self.reviewed_by} if approve else None
         create_result = self._call(
@@ -794,6 +813,144 @@ def _display_payload_markdown(root: Path, payload: dict[str, Any]) -> dict[str, 
 
 def _display_note_payload(root: Path, note: dict[str, Any]) -> dict[str, str]:
     return _display_payload_markdown(root, note)
+
+
+def _knowledge_payload(root: Path, knowledge_id: str) -> dict[str, Any]:
+    workspace = Workspace(root)
+    repository = ObjectRepository(workspace)
+    matches = [
+        record
+        for record in repository.iter_object_metadata()
+        if record.object_id == knowledge_id and record.metadata.get("type") == "knowledge"
+    ]
+    if not matches:
+        raise ValueError(f"target knowledge not found: {knowledge_id}")
+    if len(matches) > 1:
+        raise ValueError(f"target knowledge ID is duplicated: {knowledge_id}")
+    record = matches[0]
+    document = repository.read_markdown(workspace.relative(record.path))
+    return {
+        "id": knowledge_id,
+        "path": str(workspace.relative(record.path)),
+        "frontmatter": document.frontmatter,
+        "body": document.body,
+    }
+
+
+def _knowledgebase_create_llm_request(
+    root: Path,
+    title: str,
+    input_path: str | Path,
+) -> dict[str, Any]:
+    input_context = _knowledgebase_input_context(root, input_path)
+    constraints = [
+        "draft_only",
+        "human_review_required",
+        "must_not_create_source_or_candidate",
+        "preserve_meaningful_outline_hierarchy",
+    ]
+    prompt = assemble_prompt(
+        system_prompt="knowledgebase-create",
+        user_input={"title": title, "input_path": str(input_path)},
+        object_context={
+            "knowledgebase_create_input": input_context,
+            "include_object_body": True,
+        },
+        output_schema="knowledgebase_create_draft",
+        constraints=constraints,
+    )
+    return {
+        "id": "llm-knowledgebase-create",
+        "purpose": "knowledgebase_create",
+        "system_prompt": prompt["system_prompt"],
+        "prompt_version": prompt["prompt_version"],
+        "required_context": ["knowledgebase_create_input"],
+        "output_schema": "knowledgebase_create_draft",
+        "output_schema_definition": schema_for_output("knowledgebase_create_draft"),
+        "constraints": constraints,
+        "prompt": prompt,
+    }
+
+
+def _knowledgebase_input_context(root: Path, input_path: str | Path) -> dict[str, Any]:
+    input_text = str(input_path)
+    if _is_url(input_text):
+        return {
+            "input_path": input_text,
+            "input_kind": "url",
+            "content": _download_text_context(input_text),
+        }
+
+    resolved = _resolve_interface_input(root, input_path)
+    if resolved.is_file():
+        return {
+            "input_path": input_text,
+            "input_kind": "file",
+            "resolved_path": str(resolved),
+            "content": resolved.read_text(encoding="utf-8"),
+        }
+    if resolved.is_dir():
+        documents = []
+        for path in sorted(resolved.rglob("*")):
+            if path.is_file() and path.suffix.lower() in {".md", ".txt", ".yaml", ".yml"}:
+                documents.append(
+                    {
+                        "path": str(path),
+                        "content": path.read_text(encoding="utf-8"),
+                    }
+                )
+        return {
+            "input_path": input_text,
+            "input_kind": "directory",
+            "resolved_path": str(resolved),
+            "documents": documents,
+        }
+    return {
+        "input_path": input_text,
+        "input_kind": "missing",
+        "content": "",
+        "warning": "Input path was not readable when assembling the LLM request.",
+    }
+
+
+def _resolve_interface_input(root: Path, input_path: str | Path) -> Path:
+    path = Path(input_path).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    workspace_path = (root / path).resolve()
+    if workspace_path.exists():
+        return workspace_path
+    return path.resolve()
+
+
+def _is_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _download_text_context(url: str) -> str:
+    request = Request(url, headers={"User-Agent": "KBManager/0.1"})
+    with urlopen(request, timeout=20) as response:
+        raw = response.read(MAX_KNOWLEDGEBASE_INPUT_BYTES + 1)
+        if len(raw) > MAX_KNOWLEDGEBASE_INPUT_BYTES:
+            raise ValueError(
+                f"knowledgebase create input exceeds {MAX_KNOWLEDGEBASE_INPUT_BYTES} bytes: {url}"
+            )
+        charset = response.headers.get_content_charset() or "utf-8"
+        content_type = response.headers.get_content_type()
+    text = raw.decode(charset, errors="replace")
+    if content_type in {"text/html", "application/xhtml+xml"}:
+        return text
+    if content_type.startswith("text/"):
+        return (
+            "<!doctype html>\n"
+            "<html>\n"
+            "<body>\n"
+            f"<pre>{escape(text)}</pre>\n"
+            "</body>\n"
+            "</html>\n"
+        )
+    raise ValueError(f"unsupported knowledgebase create URL content type: {content_type}")
 
 
 def _claude_request(kind: str, action: str, instructions: str) -> dict[str, str]:

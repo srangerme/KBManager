@@ -28,7 +28,7 @@ Flow:
 5. If the response is `needs_llm`, append the confirmed user ingest prompt to `llm_request.prompt`, then use the prompt and `output_schema_definition` to produce a structured `llm_result` containing source `summary`, `tags`, and `cleaned_content`.
 6. Resume `kb.source.add` with the same user-supplied `input_path`, `resume_token`, and `llm_result`.
 7. Call `kb.candidate.create` with the returned `source_ids`.
-8. If candidate creation returns `needs_llm`, first use the provided knowledgebase `description`, `scope`, and `outline` context to decide which knowledge can be extracted, then generate candidate drafts that match `llm_request.output_schema_definition`, including `title`, `summary`, `content`, `evidence`, `bindto`, and any `outline_change_suggestions`; resume `kb.candidate.create`.
+8. If candidate creation returns `needs_llm`, first use the provided knowledgebase `description`, `scope`, `default_outline_id`, and `outlines` context to decide which knowledge can be extracted, then generate candidate drafts that match `llm_request.output_schema_definition`, including `title`, `summary`, `content`, `evidence`, `bindto`, and any `outline_change_suggestions`; resume `kb.candidate.create`.
 9. Show created source and candidate IDs, plus suggested `bindto` and outline change suggestions.
 10. After a successful write, report the API's automatic `kb.index.rebuild` result.
 

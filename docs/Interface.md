@@ -44,6 +44,9 @@
 /knowledgebase create <path-or-url>
 /knowledgebase list [knowledgebase-id]
 /knowledgebase map [knowledgebase-id]
+/knowledgebase outline create [knowledgebase-id] <path-or-url>
+/knowledgebase outline set-default [knowledgebase-id] [outline-id]
+/knowledgebase outline archive [knowledgebase-id] [outline-id]
 /note add
 /note list
 /note view <note-id>
@@ -207,17 +210,38 @@ resume:
 - LLM：必须执行。只在第一层根据 candidate、source 引用、相关 knowledge 和 knowledgebase `outline` 生成辅助说明、证据检查、`bindto` 检查、outline 修改建议解释和风险提示，不写入数据；第二层不再提供 candidate review 组合 API。
 - API 编排：`kb.candidate.get` -> 用户选择 `reject` 时调用 `kb.knowledge.reject`，选择 `defer` 时调用 `kb.candidate.defer`；选择 `accept` 或 `merge` 时，Interface 先在 Claude Code 展示预填建议的 reviewed Markdown，等待用户回复确认或修改后，再调用 `kb.knowledge.accept` 或 `kb.knowledge.merge` 写入。
 - Review 草案：accept/merge 的 Claude Code 草案预填 candidate `summary`、`content`、`evidence`、`bindto` 和 review 备注；用户可编辑标题、summary、content、`evidence`、`bindto` 和 merge targets。
-- Outline 决策：candidate 如果包含 `outline_change_suggestions`，Interface 先展示并与用户交互确认是否采纳或暂缓。按当前边界，review 不自动修改 knowledgebase `outline`，`kb.knowledge.accept` 和 `kb.knowledge.merge` 也不会修改 outline；用户确认只用于记录 review 判断和决定本次是否继续 accept/merge。
+- Outline 决策：candidate 如果包含 `outline_change_suggestions`，Interface 先展示并与用户交互确认是否采纳或暂缓。candidate review 不自动修改 knowledgebase outline，`kb.knowledge.accept` 和 `kb.knowledge.merge` 也不会修改 outline；如需落地大纲变更，用户应通过 `/knowledgebase outline create`、`/knowledgebase outline set-default` 或 `/knowledgebase outline archive` 走独立 review 流程。
 - Knowledgebase 决策：candidate 创建时已经生成 `bindto` 建议；review 时 Interface 可补充只读建议，但最终只以用户在 Claude Code 中确认后的 `bindto` 为准。accept/merge 只写入 knowledge 的 `bindto`，knowledgebase 成员视图由索引派生；不会创建新的 knowledgebase、修改 knowledgebase 对象成员列表或提供独立成员维护流程。
 - 输出：candidate 新状态；如接受或合并，展示生成或更新的 knowledge。
 
 ### `/knowledgebase create <path-or-url>`
 
 - 输入：source-like input；input 格式与 `/source add` 相同，可以是目录、文件路径或 URL。
-- 行为：先询问用户 title 并创建最小 knowledgebase，再用输入材料生成 create 阶段的 `description`、`tags`、`scope` 和 `outline`。
-- API 编排：解析或收集 input -> 询问 title -> `kb.knowledgebase.create` -> `kb.knowledgebase.init` -> 接管 `needs_llm` 并生成 create 阶段草案 -> resume 交回 API 校验 -> API 返回 `needs_review` -> 在 Claude Code 展示草案 -> 用户确认或修改 -> 带 review 和 reviewed payload 再次 resume `kb.knowledgebase.init`。
-- 约束：该输入不是 `source` 对象，不创建 `source-*`，不写入 `data/raw` 或 `data/cleaned`，不进入 source index，也不成为 knowledgebase 成员；它只作为本次初始化的临时上下文。URL 采集仍由 API 负责，Interface 不自行下载、打开浏览器、打印导出 PDF、抓取网页或保存 Markdown。
-- 输出：knowledgebase ID、标题、create 阶段字段摘要、路径和自动索引重建结果。
+- 行为：询问用户 title，使用输入材料生成 create 阶段的 `description`、`tags`、`scope`、`default_outline_id` 和 `outlines` 草案，用户 review 后创建 active knowledgebase。
+- API 编排：解析或收集 input -> 询问 title -> 使用 `knowledgebase-create.md` 系统提示词生成草案 -> 在 Claude Code 展示草案 -> 用户确认或修改 -> 调用 `kb.knowledgebase.create`，传入 reviewed payload 和 `review.decision: approve`。
+- 约束：该输入不是 `source` 对象，不创建 `source-*`，不写入 `data/raw` 或 `data/cleaned`，不进入 source index，也不成为 knowledgebase 成员；它只作为本次创建的临时上下文。Interface 不得把临时 input 写入对象文件；URL 采集如需自动化，应保持为临时上下文，不得落入 source 目录。
+- 输出：knowledgebase ID、标题、Markdown 路径、outlines YAML 路径和自动索引重建结果。
+
+### `/knowledgebase outline create [knowledgebase-id] <path-or-url>`
+
+- 输入：knowledgebase ID 和 source-like input。
+- 行为：基于临时输入材料生成新 outline 草案，展示给用户 review；用户确认后调用 API 追加 outline。
+- API 编排：`kb.knowledgebase.outline.create`。
+- 约束：不创建 source，不修改 knowledge，也不修改成员关系；只更新 knowledgebase 的 outlines YAML 和 frontmatter manifest。
+
+### `/knowledgebase outline set-default [knowledgebase-id] [outline-id]`
+
+- 输入：knowledgebase ID 和 outline ID；缺少时 Interface 只读列出可选 outline 并要求用户选择。
+- 行为：用户确认后切换默认 outline。
+- API 编排：`kb.knowledgebase.outline.set_default`。
+- 约束：目标 outline 必须为 active；该操作不改写 knowledge `bindto`。
+
+### `/knowledgebase outline archive [knowledgebase-id] [outline-id]`
+
+- 输入：knowledgebase ID 和 outline ID；缺少时 Interface 只读列出可选 outline 并要求用户选择。
+- 行为：展示已有绑定影响，用户确认后归档非默认 outline。
+- API 编排：`kb.knowledgebase.outline.archive`。
+- 约束：默认 outline 不能直接归档；如已有 knowledge 绑定到该 outline，必须取得用户对影响范围的明确确认。
 
 ### `/knowledgebase list [knowledgebase-id]`
 

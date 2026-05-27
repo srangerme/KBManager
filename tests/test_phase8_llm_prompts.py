@@ -121,7 +121,35 @@ def test_candidate_draft_without_evidence_is_rejected(tmp_path: Path) -> None:
     assert "evidence must be a non-empty list" in result["errors"][0]["message"]
 
 
-def test_interface_rejects_invalid_merge_assist_schema() -> None:
+def test_candidate_create_llm_request_includes_source_context(tmp_path: Path) -> None:
+    source_id = _create_source(tmp_path)
+
+    first = candidate_create(tmp_path, source_ids=[source_id]).to_dict()
+
+    source_context = first["llm_request"]["prompt"]["sections"][1]["content"]["source_context"]
+    assert source_context[0]["id"] == source_id
+    assert "Useful cleaned content." in source_context[0]["cleaned_content"]
+    assert source_context[0]["cleaned_path"].startswith("data/cleaned/")
+
+
+def test_interface_rejects_invalid_merge_assist_schema(tmp_path: Path) -> None:
+    (tmp_path / "knowledge/atomic").mkdir(parents=True)
+    (tmp_path / "knowledge/atomic/knowledge-2.md").write_text(
+        "---\n"
+        "id: knowledge-2\n"
+        "type: knowledge\n"
+        "title: Target\n"
+        "status: accepted\n"
+        "summary: Target summary.\n"
+        "evidence: []\n"
+        "bindto: []\n"
+        "created: 2026-05-20\n"
+        "updated: 2026-05-20\n"
+        "---\n"
+        "\n"
+        "Target body.\n",
+        encoding="utf-8",
+    )
     class MockApi:
         def call(self, operation: str, **kwargs: object) -> dict[str, object]:
             return {
@@ -151,7 +179,7 @@ def test_interface_rejects_invalid_merge_assist_schema() -> None:
                 return {"summary": "s", "evidence_review": [], "bindto": [], "recommendations": []}
             return {"merged_body": "old"}
 
-    result = SlashCommandInterface(api=MockApi(), llm=MockLlm()).kb_candidate_review(
+    result = SlashCommandInterface(root=tmp_path, api=MockApi(), llm=MockLlm()).kb_candidate_review(
         "knowledge-1",
         decision="merge",
         merge_targets=["knowledge-2"],

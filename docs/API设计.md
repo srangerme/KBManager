@@ -119,7 +119,7 @@ llm_result: {}
 带 review 的 resume 请求：
 
 ```yml
-operation: kb.knowledgebase.init
+operation: <same operation returned by needs_llm>
 resume_token: resume-20260520-001
 llm_result: {}
 review:
@@ -264,15 +264,17 @@ candidates:
         quote: supporting text         # quote/excerpt/snippet 三者至少一个
     bindto:
       - kb_id: kb-YYYYMMDD-001-title
-        outline_node: node-id-or-path
+        outline_id: canonical
+        node_id: node-id
         reason: non-empty string
     outline_change_suggestions:
       - kb_id: kb-YYYYMMDD-001-title
+        outline_id: canonical          # 可选；当建议针对某个现有 outline 时填写
         reason: non-empty string
         suggested_change: non-empty string
 ```
 
-- `title`、`summary` 和 `content` 必须是非空字符串。candidate 和正式 knowledge 都只使用 `evidence` 追溯来源。`bindto[].kb_id` 必须指向已有 active knowledge base；`outline_node` 必须指向该 knowledge base 的现有 outline 节点。若内容属于某个 knowledge base 的 `scope` 但当前 `outline` 无法覆盖，则不得伪造 `outline_node`，应在 `outline_change_suggestions` 中说明建议如何修改。
+- `title`、`summary` 和 `content` 必须是非空字符串。candidate 和正式 knowledge 都只使用 `evidence` 追溯来源。`bindto[].kb_id` 必须指向已有 active knowledge base；`bindto[].outline_id` 必须指向该 knowledge base 的 active outline；`bindto[].node_id` 必须指向该 outline 的现有节点。若内容属于某个 knowledge base 的 `scope` 但当前 outline 无法覆盖，则不得伪造 `node_id`，应在 `outline_change_suggestions` 中说明建议如何修改。
 - 输出：candidate/knowledge ID 列表、`bindto` 建议和 outline 修改建议。
 
 ### `kb.candidate.get`
@@ -320,7 +322,7 @@ candidates:
 - 写入：更新目标 knowledge 的 `summary`、`evidence`、正文、review 字段和 `bindto`，来源 candidate 变为 rejected 状态；candidate ID 不生成同 ID knowledge 文件。成功写入后 API 自动调用 `kb.index.rebuild`，由索引根据 knowledge `bindto` 派生 knowledge base 成员视图。
 - LLM 辅助：不需要。合并方案和 `bindto` 建议由 Interface 层在 Claude Code review 前生成。
 - Review gate：必须携带 user 的 merge 决策；写入内容必须来自用户在 Claude Code 确认后的 reviewed Markdown 或等价结构化输入。
-- reviewed payload 校验：`summary` 和 `content` 必须是非空字符串；`evidence` 必须至少引用一个 source；`bindto` 必须显式提供，空列表用 `[]`。`bindto[].kb_id` 必须指向已有 active knowledge base 且 `outline_node` 必须存在。`target_knowledge_id` 必须是已 accepted 的 knowledge。
+- reviewed payload 校验：`summary` 和 `content` 必须是非空字符串；`evidence` 必须至少引用一个 source；`bindto` 必须显式提供，空列表用 `[]`。`bindto[].kb_id` 必须指向已有 active knowledge base，`outline_id` 必须指向 active outline，`node_id` 必须存在。`target_knowledge_id` 必须是已 accepted 的 knowledge。
 - 输出：合并后的目标 knowledge、被合入的 candidate ID 和写入 knowledge 的 `bindto` 列表。
 - ID 规则：merge 到已有 knowledge 时，最终对象使用目标 knowledge ID；candidate 记录保留原 ID、状态为 `rejected`。同一 ID 不得同时存在 candidate 文件和 knowledge 文件。
 - 约束：本 API 不创建 knowledge base 对象，不修改 knowledge base `outline`，也不提供独立 add/remove 成员维护能力；knowledge base 成员关系只由 knowledge `bindto` 表达，并通过索引派生展示。
@@ -347,30 +349,43 @@ candidates:
 
 ### `kb.knowledgebase.create`
 
-- 输入：`title`，可选 `knowledgebase_id`。
+- 输入：`title`、经用户 review 确认后的 `description`、`tags`、`scope`、`default_outline_id`、`outlines`，可选 `knowledgebase_id`。
 - 读取：knowledgebase 模板、已有 knowledgebase 摘要。
-- 写入：最小 knowledgebase Markdown，包含 `id`、`type: knowledge-base`、`title`、`status: initializing`、空 `description`、空 `tags`、空 `scope.includes/excludes`、空 `outline`、空 `reviewed_at`、空 `review_decision`、`created` 和 `updated`；成功写入后 API 自动调用 `kb.index.rebuild` 重建派生索引。
-- LLM 辅助：不需要。
-- Review gate：不需要。该 API 只创建最小空壳对象，不写入知识库定义内容，也不写入 review 相关字段内容；初始化 review 由 `kb.knowledgebase.init` 完成。
-- 校验：`title` 必须是非空字符串；显式 `knowledgebase_id` 必须形如 `kb-YYYYMMDD-001` 或 `kb-YYYYMMDD-001-title-slug` 且全局唯一；标题不能与已有 knowledge-base 重复。
-- 输出：knowledgebase ID、路径。
-- 约束：本 API 只创建 knowledgebase，不提供 knowledgebase add/remove 成员维护能力。
+- 写入：active knowledgebase Markdown，以及同名 outlines YAML 文件。knowledgebase frontmatter 包含 `id`、`type: knowledge-base`、`title`、`status: active`、`description`、`tags`、`scope`、`default_outline_id`、`outlines_file`、`outlines` manifest、review 字段、`created` 和 `updated`；完整 outline 树写入 `outlines_file` 指向的 YAML 文件。成功写入后 API 自动调用 `kb.index.rebuild` 重建派生索引。
+- LLM 辅助：API 本身不返回 `needs_llm`。`/knowledgebase create <path-or-url>` 的 source-like input 由 Interface 临时读取或采集，并使用 `knowledgebase-create.md` 系统提示词生成草案；用户确认后，Interface 将 reviewed payload 交给本 API。
+- Review gate：需要。缺少 `review.decision: approve` 时返回 `needs_review`，不得写入。
+- 校验：`title` 和 `description` 必须是非空字符串；`tags` 必须是字符串列表；`scope` 必须明确包含和排除范围；显式 `knowledgebase_id` 必须形如 `kb-YYYYMMDD-001` 或 `kb-YYYYMMDD-001-title-slug` 且全局唯一；标题不能与已有 knowledge-base 重复；`default_outline_id` 必须指向一个 active outline；每个 outline 和可绑定 node 必须有稳定 ID。
+- 输出：knowledgebase ID、Markdown 路径、outlines YAML 路径和自动索引重建结果。
+- 约束：本 API 不创建 source 对象，不写入 `data/raw` 或 `data/cleaned`，不提供 knowledgebase add/remove 成员维护能力；knowledgebase 成员关系只由 knowledge `bindto` 表达。
 
-### `kb.knowledgebase.init`
+### `kb.knowledgebase.outline.create`
 
-- 输入：`knowledgebase_id`、`input_path` 或 URL/文件/目录等 source-like input；可选用户补充说明。输入格式与 `kb.source.add` 对齐，但语义不同。
-- 读取：目标 knowledgebase、knowledgebase 模板和输入材料。
-- 写入：只更新目标 knowledgebase 的 `description`、`tags`、`scope`、`outline`、`status: active`、`reviewed_at`、`review_decision` 和 `updated`；不创建 `source-*` 对象，不写入 `data/raw` 或 `data/cleaned`，不把输入材料加入 source index 或 knowledgebase 成员关系。
-- LLM 辅助：必需。API 返回 `needs_llm`，Claude Code 基于临时读取/采集的输入材料生成 `description`、`tags`、`scope` 和 `outline` 草案后 resume；API 校验 `llm_result` 后返回 `needs_review`，由 Interface 展示草案并收集用户确认或修改。
-- Review gate：必须在带 review 的 resume 请求中携带 user 的 approve 决策和 reviewed payload；写入内容必须来自用户在 Claude Code 确认后的 reviewed Markdown 或等价结构化输入。缺少 review 决策或 reviewed payload 时，API 返回 `needs_review`，不得写入。
-- 校验：目标 knowledgebase 必须存在且不是 `archived`；`description` 必须是非空字符串；`tags` 必须是字符串列表；`scope` 必须明确包含和排除范围；`outline` 可以是很大且复杂的节点树或节点列表，但每个可绑定节点必须有稳定 ID 或路径。
-- 输出：knowledgebase ID、路径、create 阶段字段摘要和自动索引重建结果。
-- 约束：本 API 的 source-like input 只是初始化上下文，不成为 KBManager source，也不作为后续 candidate 的证据来源。
+- 输入：active knowledgebase ID、经用户 review 确认的新 outline。
+- 读取：knowledgebase Markdown 和 `outlines_file`。
+- 写入：向 outlines YAML 追加新 outline，并更新 knowledgebase frontmatter 中的 `outlines` manifest 和 `updated`；成功写入后 API 自动调用 `kb.index.rebuild`。
+- Review gate：需要 `review.decision: approve`。
+- 校验：knowledgebase 必须 active；outline ID 不得重复；outline 必须有非空 `id`、`title`、`description`、`status` 和节点列表；节点 ID 在该 outline 内必须唯一。
+
+### `kb.knowledgebase.outline.set_default`
+
+- 输入：active knowledgebase ID、active outline ID。
+- 读取：knowledgebase Markdown 和 `outlines_file`。
+- 写入：更新 knowledgebase frontmatter 和 outlines YAML 中的 `default_outline_id`；成功写入后 API 自动调用 `kb.index.rebuild`。
+- Review gate：需要 `review.decision: approve`。
+- 校验：目标 outline 必须存在且为 active。
+
+### `kb.knowledgebase.outline.archive`
+
+- 输入：active knowledgebase ID、非默认 outline ID，可选 `allow_existing_bindings`。
+- 读取：knowledgebase Markdown、`outlines_file` 和现有 accepted knowledge 的 `bindto`。
+- 写入：将目标 outline 状态置为 `archived`，并更新 knowledgebase frontmatter 中的 `outlines` manifest；成功写入后 API 自动调用 `kb.index.rebuild`。
+- Review gate：需要 `review.decision: approve`。
+- 校验：不得归档默认 outline；如果已有 knowledge 绑定到该 outline，除非用户明确允许 `allow_existing_bindings: true`，否则返回失败并列出影响。
 
 ### `kb.knowledgebase.map`
 
 - 输入：可选 `knowledgebase_id`、可选 `output_path`。
-- 读取：active knowledgebase 的 `outline` 和 accepted knowledge 的 `bindto`。
+- 读取：active knowledgebase 的 `outlines_file`、`default_outline_id` 和 accepted knowledge 的 `bindto`。
 - 写入：临时 Markdown 文件；不写入 repo-tracked index 或对象文件。
 - LLM 辅助：不需要。
 - Review gate：不需要，因为输出是派生视图。
@@ -412,7 +427,7 @@ candidates:
 ### `kb.index.rebuild`
 
 - 输入：重建范围 `all | source | candidate | knowledge | knowledgebase | note | review_queue`，可选对象 ID、`dry_run`。
-- 读取：对象文件、frontmatter、`.meta.yml`、knowledgebase `outline` 和 knowledge `bindto`。
+- 读取：对象文件、frontmatter、`.meta.yml`、knowledgebase outlines YAML 和 knowledge `bindto`。
 - 写入：目标范围内的派生索引文件；`dry_run` 时不写入，只返回拟更新 diff。
 - LLM 辅助：不需要。
 - Review gate：不需要，因为索引是派生视图，不是事实来源。
@@ -435,7 +450,8 @@ candidates:
 - source deprecated。
 - candidate defer。
 - knowledge accept/merge/reject/deprecate。
-- knowledgebase create initialization stage。
+- knowledgebase create。
+- knowledgebase outline create/set-default/archive。
 - note deprecated。
 
 缺少 user review 时返回：

@@ -17,9 +17,10 @@
 | `/check` | 修改 | 展示 `bindto` 和 outline 节点一致性问题。 |
 | `/clean` | 修改 | 特许迁移命令；完整计划经用户整批确认后才允许直接改新设计内的 schema 或目录 drift。 |
 | `/init` | 不改主流程 | 初始化流程不受模型变化影响。 |
-| `/knowledgebase create <path-or-url>` | 修改 | 创建最小 knowledgebase 后立即从 source-like input 生成 create 阶段字段，但不创建 source。 |
-| `/knowledgebase list` | 字段同步 | 只读流程不变，展示内容随索引包含 `scope/outline`。 |
-| `/knowledgebase map [knowledgebase-id]` | 修改 | 基于 `outline + bindto`，不再基于 knowledge 层级关系。 |
+| `/knowledgebase create <path-or-url>` | 修改 | 从 source-like input 生成 create 阶段字段，经用户 review 后一次性创建 active knowledgebase 和 outlines YAML，不创建 source。 |
+| `/knowledgebase list` | 字段同步 | 只读流程不变，展示内容随索引包含 knowledgebase 和成员视图。 |
+| `/knowledgebase map [knowledgebase-id]` | 修改 | 基于默认 outline 和 `bindto`，不再基于 knowledge 层级关系。 |
+| `/knowledgebase outline create/set-default/archive` | 新增 | 独立管理 knowledgebase outline，均需用户 review。 |
 | `/lark server start/status/stop` | 不改主流程 | server 生命周期不受知识模型变化影响。 |
 | `/note add/list/view/deprecate` | 不改主流程 | note 操作流程不受知识模型变化影响。 |
 | `/source add <path>` | 修改 | candidate create 阶段先读 knowledgebase 定义，再生成 candidate。 |
@@ -95,14 +96,11 @@ flowchart TD
 flowchart TD
   A["(user) 输入命令和 source-like input"] --> B["(interface) 原样保留 input；URL 不自行下载或导出"]
   B --> C["(interface) 询问用户 title"]
-  C --> D["(api) kb.knowledgebase.create"]
-  D --> E["(api) kb.knowledgebase.init"]
-  E --> F["(interface) 接管 needs_llm 并生成 description、tags、scope、outline 草案"]
-  F --> G["(api) resume kb.knowledgebase.init 交回 llm_result 校验"]
-  G --> H["(interface) 展示 API 返回的 needs_review 草案"]
-  H --> I["(user) approve 或回复修改后的 Markdown/结构化字段"]
-  I --> J["(api) 带 review 和 reviewed payload 再次 resume kb.knowledgebase.init"]
-  J --> K["(interface) 展示 knowledgebase ID、create 阶段字段摘要和索引重建结果"]
+  C --> D["(LLM) 使用 knowledgebase-create 系统提示词生成 description、tags、scope、default_outline_id 和 outlines 草案"]
+  D --> E["(interface) 展示草案"]
+  E --> F["(user) approve 或回复修改后的结构化字段"]
+  F --> G["(api) kb.knowledgebase.create 传入 reviewed payload 和 approve review"]
+  G --> H["(interface) 展示 knowledgebase ID、Markdown 路径、outlines YAML 路径和索引重建结果"]
 ```
 
 ## 6. `/knowledgebase list`

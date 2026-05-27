@@ -40,9 +40,8 @@ Hard rules:
 
 - This command must not create source objects.
 - This command must not write to `data/raw/` or `data/cleaned/`.
-- The source-like input is temporary initialization context only and must not be added to source indexes or knowledgebase member views.
+- The source-like input is temporary creation context only and must not be added to source indexes or knowledgebase member views.
 - Do not modify knowledge files or knowledgebase member lists directly.
-- Do not call `kb.knowledgebase.create` until the user has replied with the title.
-- Do not call the final write resume until the user has replied and approved or edited the reviewed payload in Claude Code.
+- Do not call `kb.knowledgebase.create` until the user has replied with the title and approved or edited the reviewed payload in Claude Code.
 - Do not create or edit knowledgebase files directly.
 - After success, report the API's automatic `kb.index.rebuild` result. Do not run a separate rebuild from the command.
