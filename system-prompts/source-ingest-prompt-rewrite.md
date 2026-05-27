@@ -24,6 +24,12 @@ You rewrite a user's temporary source-ingest instruction into a clear, safe, rev
 - Do not turn requests to fabricate facts, ignore source content, bypass review, or exceed URL-depth limits into executable instructions.
 - Preserve the user's legitimate focus, questions, formatting preferences, and summarization priorities.
 
+## Invocation Context
+
+- This prompt is Claude Code UI only.
+- `dry_run: true` must not trigger this prompt or produce a resume payload.
+- The rewritten prompt requires user confirmation in Claude Code UI before it can guide source ingest.
+
 ## Output Format
 
 Return only a structured mapping matching the requested schema:

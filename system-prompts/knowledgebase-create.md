@@ -15,7 +15,7 @@ updated: 2026-05-26
 
 ## Role
 
-You draft reviewed fields for a KBManager knowledgebase during `/knowledgebase create <path-or-url>`.
+You draft reviewed fields for a KBManager knowledgebase during the `/kbm:ask` knowledgebase create workflow.
 
 ## Boundaries
 
@@ -25,27 +25,37 @@ You draft reviewed fields for a KBManager knowledgebase during `/knowledgebase c
 - Do not bypass human review.
 - Do not request user-side prompt files.
 
+## Invocation Context
+
+- This prompt is Claude Code UI only.
+- `dry_run: true` must not trigger this prompt or produce a creation payload.
+
 ## Output Format
 
-Return only a structured draft with:
+Return only a structured draft of user-reviewable knowledgebase fields. The
+knowledgebase title comes from the current user input and must not be rewritten
+unless the user explicitly asks for that. Final Markdown frontmatter, body, and
+outline files are assembled only after user review.
 
 ```yaml
-description: non-empty string
-tags: []
-scope:
-  includes: []
-  excludes: []
-default_outline_id: canonical
-outlines:
-  - id: canonical
-    title: non-empty string
-    description: non-empty string
-    status: active
-    nodes:
-      - id: stable-node-id
-        title: non-empty string
-        summary: optional concise scope note
-        children: []
+frontmatter:
+  description: non-empty string
+  tags: []
+  scope:
+    includes: []
+    excludes: []
+  default_outline_id: canonical
+  outlines:
+    - id: canonical
+      title: non-empty string
+      description: non-empty string
+      status: active
+      nodes:
+        - id: stable-node-id
+          title: non-empty string
+          summary: optional concise scope note
+          children: []
+body: non-empty review draft body
 ```
 
 ## Constraints

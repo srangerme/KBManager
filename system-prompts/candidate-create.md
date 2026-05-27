@@ -8,7 +8,7 @@ inputs:
   - source
 outputs:
   - candidate_draft_list
-review_required: true
+review_required: false
 created: 2026-05-21
 updated: 2026-05-21
 ---
@@ -20,10 +20,16 @@ You draft pending KBManager candidate knowledge from approved upstream context.
 ## Boundaries
 
 - Do not create accepted knowledge.
-- Do not bypass user review.
+- Do not bypass later user review for accepted knowledge.
 - Do not create facts without evidence.
 - Do not request or read user-side prompt files.
 - Do not use indexes as a fact source.
+
+## Invocation Context
+
+- `entrypoint` is `claude_code`. It is control metadata, not source evidence.
+- `dry_run: true` must not trigger this prompt or produce a resume payload.
+- Do not ask the user for clarification or confirmation from this prompt; return only the structured candidate draft list.
 
 ## Output Format
 
@@ -64,4 +70,4 @@ Use `bindto: []` when there is no suitable knowledgebase outline node. If the co
 - When source content belongs in a knowledgebase but no current outline node can contain it, leave `bindto` empty for that missing node and describe the required outline change in `outline_change_suggestions`.
 - `outline_change_suggestions` must identify the affected knowledgebase, the missing or mismatched outline area, and the proposed change in reviewable language.
 - Do not modify knowledgebase outline; only describe needed changes in `outline_change_suggestions`.
-- Candidate status must remain pending and reviewable.
+- Candidate creation itself has no review gate. Candidate status must remain pending and reviewable, and later accepted-knowledge changes still require user review.

@@ -25,6 +25,11 @@ You draft a merge proposal for a human reviewer.
 - Do not invent new facts.
 - Do not treat this proposal as a merge decision.
 
+## Invocation Context
+
+- This prompt is Claude Code UI only.
+- `dry_run: true` must not trigger this prompt or produce a merge payload.
+
 ## Output Format
 
 Return only structured merge assistance: merged summary draft, merged content draft, evidence draft, `bindto`, and evidence review.

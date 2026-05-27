@@ -1,240 +1,97 @@
-# Slash Command 流程图
+# 单入口流程图
 
-本文描述第一层 slash command 的交互流程。流程只展开到调用第二层 `kb.*` API 为止，不描述 API 内部读写细节。
+本文描述 `/kbm:ask` 的第一层交互流程。流程只展开到调用第二层 `kb.*`
+API 为止，不描述 API 内部读写细节。
 
 标记含义：
 
 - `(user)`：用户输入、回复、选择或确认。
-- `(interface)`：Claude Code / slash command 编排；review 草案和用户补充内容都通过 Claude Code 交互。
-- `(LLM)`：第一层用于意图解析、结果整理、问题展示或问答范围判断。
+- `(ask)`：`/kbm:ask` 编排。
+- `(skill)`：`kbm-*` skill 提供的流程、规则或 API 参考。
+- `(LLM)`：意图解析、`needs_llm` 输出生成、review assist 或结果整理。
 - `(api)`：第二层 `kb.*` API 调用。
 
-## 流程影响审查
-
-| Slash command | 结论 | 说明 |
-| --- | --- | --- |
-| `/candidate review [candidate-id]` | 修改 | 展示 evidence、`bindto` 和 outline 修改建议；accept/merge 的 reviewed payload 包含 evidence，不自动改 outline。 |
-| `/check` | 修改 | 展示 `bindto` 和 outline 节点一致性问题。 |
-| `/clean` | 修改 | 特许迁移命令；完整计划经用户整批确认后才允许直接改新设计内的 schema 或目录 drift。 |
-| `/init` | 不改主流程 | 初始化流程不受模型变化影响。 |
-| `/knowledgebase create <path-or-url>` | 修改 | 从 source-like input 生成 create 阶段字段，经用户 review 后一次性创建 active knowledgebase 和 outlines YAML，不创建 source。 |
-| `/knowledgebase list` | 字段同步 | 只读流程不变，展示内容随索引包含 knowledgebase 和成员视图。 |
-| `/knowledgebase map [knowledgebase-id]` | 修改 | 基于默认 outline 和 `bindto` 生成从左到右展开的结构图，不再基于 knowledge 层级关系。 |
-| `/knowledgebase outline create/set-default/archive` | 新增 | 独立管理 knowledgebase outline，均需用户 review。 |
-| `/lark server start/status/stop` | 不改主流程 | server 生命周期不受知识模型变化影响。 |
-| `/note add/list/view/deprecate` | 不改主流程 | note 操作流程不受知识模型变化影响。 |
-| `/source add <path>` | 修改 | candidate create 阶段先读 knowledgebase 定义，再生成 candidate。 |
-| `/source deprecate <source-id>` | 不改主流程 | source 废弃流程不受模型变化影响。 |
-
-## 1. `/candidate review [candidate-id]`
+## 1. Claude Code UI 总流程
 
 ```mermaid
 flowchart TD
-  A["(user) 输入命令"] --> B{"(interface) 是否提供 candidate ID"}
-  B -- 否 --> C["(api) kb.candidate.next_pending"]
-  B -- 是 --> D["(api) kb.candidate.get"]
-  C --> D
-  D --> E["(interface) 用 Claude Code 展示 candidate Markdown"]
-  E --> F["(LLM) 生成只读 review 辅助说明"]
-  F --> G["(interface) 展示 candidate、evidence、bindto、outline 修改建议和处理选项"]
-  G --> H{"(interface) 是否存在 outline_change_suggestions"}
-  H -- 是 --> I["(user) 交互确认是否采纳或暂缓 outline 建议；不自动写 outline"]
-  H -- 否 --> J["(interface) 进入处理选择"]
-  I --> J
-  J --> K["(user) 选择 accept/reject/defer/merge 并输入备注"]
-  K --> L{"(interface) 处理方式"}
-  L -- accept --> M["(interface) 在 Claude Code 展示包含 evidence 的 accept 草案"]
-  M --> N["(user) 确认或回复修改后的 Markdown"]
-  N --> O["(api) kb.knowledge.accept"]
-  L -- merge --> P["(interface) 在 Claude Code 展示包含 evidence 的 merge 草案"]
-  P --> Q["(user) 确认或回复修改后的 Markdown"]
-  Q --> R["(api) kb.knowledge.merge"]
-  L -- reject --> S["(api) kb.knowledge.reject"]
-  L -- defer --> T["(api) kb.candidate.defer"]
-  O --> U["(interface) 展示处理结果"]
-  R --> U
-  S --> U
-  T --> U
+  A["(user) /kbm:ask <request>"] --> B["(ask) 解析意图和输入"]
+  B --> C["(skill) 读取 kbm-basic"]
+  C --> D["(skill) 读取 kbm-api-ui"]
+  D --> W["(skill) 读取匹配的 kbm-*-workflows"]
+  W --> E{"(ask) 输入是否足够"}
+  E -- 否 --> F["(user) 在 Claude Code UI 补充输入"]
+  F --> B
+  E -- 是 --> I["(api) 调用 kb.* operation"]
+  I --> J{"(api) status"}
+  J -- needs_llm --> K["(LLM) 按 llm_request 和 schema 生成 llm_result"]
+  K --> L["(api) resume 同一 operation"]
+  L --> J
+  J -- needs_review --> M["(ask) 在 Claude Code UI 展示选项、影响或草案"]
+  M --> N["(user) 确认、选择或提交 reviewed payload"]
+  N --> O["(api) 调用 review-gated write operation 或 resume"]
+  O --> J
+  J -- success/failed/partial --> Z["(ask) 汇报结果"]
 ```
 
-## 2. `/check`
+## 2. 旧 Slash Command 到 Skill 的映射
+
+旧的细粒度 slash command 不再作为入口暴露，只作为 `/kbm:ask` 意图和 workflow skill 的历史流程来源。
+
+| 旧流程 | 当前承载 |
+| --- | --- |
+| source add / source deprecate | `kbm-source-workflows` |
+| candidate review | `kbm-candidate-workflows` |
+| note add / note deprecate / note list / note view | `kbm-note-workflows` |
+| knowledgebase create / knowledgebase list / knowledgebase map | `kbm-knowledgebase-workflows` |
+| knowledgebase outline create / set-default / archive | `kbm-kb-outline-workflows` |
+| init / check / clean | `kbm-maintenance-workflows` |
+
+## 3. Source Add
 
 ```mermaid
 flowchart TD
-  A["(user) 输入命令"] --> B["(interface) 调用索引重建"]
-  B --> C["(api) kb.index.rebuild"]
-  C --> D["(interface) 展示更新的索引路径、bindto/outline 问题和修复方案"]
+  A["(user) source file/path/url"] --> B{"(ask) 是否带 user_prompt"}
+  B -- 是 --> C["(LLM) rewrite source ingest prompt"]
+  C --> D["(user) 确认或修改 prompt fragment"]
+  D --> E["(api) kb.source.add"]
+  B -- 否 --> E
+  E --> G["(LLM) source ingest needs_llm"]
+  G --> H["(api) resume kb.source.add"]
+  H --> I["(api) kb.candidate.create"]
+  I --> J["(LLM) candidate create needs_llm"]
+  J --> K["(api) resume kb.candidate.create"]
+  K --> L["(ask) 展示 source/candidate ID、bindto 和 outline suggestions"]
 ```
 
-## 3. `/clean`
+## 4. Review-Gated Workflows
 
 ```mermaid
 flowchart TD
-  A["(user) 输入命令"] --> B["(interface) 调用只读 clean inspection"]
-  B --> C["(api) kb.clean.inspect"]
-  C --> D{"(api) 是否存在迁移差异"}
-  D -- 否 --> E["(interface) 展示无需迁移"]
-  D -- 是 --> F["(LLM) 生成当前新设计内的 schema 或目录 drift 迁移计划"]
-  F --> G["(user) 整批确认"]
-  G --> H["(interface) /clean 特许迁移执行：确认后直接修改文件并调用 kb.index.rebuild"]
+  A["(ask) 计划 review-gated workflow"] --> D["(ask) 展示影响、选项或草案"]
+  D --> E["(user) 明确确认、选择或提交 reviewed payload"]
+  E --> F["(api) 调用 matching review-gated operation"]
+  F --> G["(ask) 汇报结果"]
 ```
 
-## 4. `/init`
+Review-gated workflows include source deprecate, candidate defer, knowledge
+accept/reject/merge/deprecate, knowledgebase create, outline create/set-default/archive,
+note deprecate, and clean migration execution.
+
+## 5. Read-Only And Utility Workflows
 
 ```mermaid
 flowchart TD
-  A["(user) 在目标目录输入命令"] --> B["(interface) 以当前调用目录作为初始化目标"]
-  B --> C["(api) kb.init"]
-  C --> D{"(api) 是否成功"}
-  D -- 是 --> E["(interface) 展示创建路径和下一步建议"]
-  D -- 否 --> F["(interface) 展示冲突原因，不创建文件"]
+  A["(ask) read-only or utility intent"] --> B{"(ask) operation"}
+  B -- list/view --> C["(ask) 只读读取对象或索引用于展示"]
+  B -- map --> D["(api) kb.knowledgebase.map"]
+  B -- check --> E["(api) kb.index.rebuild"]
+  B -- init --> F["(api) kb.init"]
+  C --> H["(ask) 汇报结果"]
+  D --> H
+  E --> H
+  F --> H
 ```
 
-## 5. `/knowledgebase create <path-or-url>`
-
-```mermaid
-flowchart TD
-  A["(user) 输入命令和 source-like input"] --> B["(interface) 原样保留 input；URL 不自行下载或导出"]
-  B --> C["(interface) 询问用户 title"]
-  C --> D["(LLM) 使用 knowledgebase-create 系统提示词生成 description、tags、scope、default_outline_id 和 outlines 草案"]
-  D --> E["(interface) 展示草案"]
-  E --> F["(user) approve 或回复修改后的结构化字段"]
-  F --> G["(api) kb.knowledgebase.create 传入 reviewed payload 和 approve review"]
-  G --> H["(interface) 展示 knowledgebase ID、Markdown 路径、outlines YAML 路径和索引重建结果"]
-```
-
-## 6. `/knowledgebase list`
-
-```mermaid
-flowchart TD
-  A["(user) 输入命令"] --> B["(interface) 定位 knowledgebase index"]
-  B --> C["(interface) 用 Claude Code 展示 knowledgebase index"]
-```
-
-## 7. `/knowledgebase map [knowledgebase-id]`
-
-```mermaid
-flowchart TD
-  A["(user) 输入命令"] --> B["(api) kb.knowledgebase.map"]
-  B --> C["(interface) 展示基于 outline + bindto 的从左到右展开的临时 Mermaid Markdown 文件"]
-  C --> D{"(interface) VSCode 是否可用"}
-  D -- 是 --> E["(interface) code --reuse-window 打开临时文件"]
-  D -- 否 --> F["(interface) 展示临时文件路径和 Markdown 内容"]
-```
-
-## 8. `/knowledgebase outline archive [knowledgebase-id] [outline-id]`
-
-```mermaid
-flowchart TD
-  A["(user) 输入命令"] --> B["(interface) 缺少 ID 时列出并要求选择"]
-  B --> C["(api) kb.knowledgebase.outline.archive"]
-  C --> D["(interface) 展示归档结果和索引重建结果"]
-```
-
-## 9. `/knowledgebase outline create [knowledgebase-id] <path-or-url>`
-
-```mermaid
-flowchart TD
-  A["(user) 输入命令"] --> B["(interface) 缺少 KB ID 或输入时要求提供"]
-  B --> C["(LLM) 基于临时输入生成 outline 草案"]
-  C --> D["(user) review/approve"]
-  D --> E["(api) kb.knowledgebase.outline.create"]
-```
-
-## 10. `/knowledgebase outline set-default [knowledgebase-id] [outline-id]`
-
-```mermaid
-flowchart TD
-  A["(user) 输入命令"] --> B["(interface) 缺少 ID 时列出并要求选择"]
-  B --> C["(user) 确认默认 outline 切换"]
-  C --> D["(api) kb.knowledgebase.outline.set_default"]
-```
-
-## 8. `/lark server start`
-
-```mermaid
-flowchart TD
-  A["(user) 输入命令"] --> B["(interface) 调用 daemon start"]
-  B --> C["(daemon) 按 workspace 进程名停止旧 server"]
-  C --> D["(daemon) 用当前 plugin/cache detached 启动 server"]
-  D --> E["(interface) 展示 pid、进程名和日志路径"]
-```
-
-## 9. `/lark server status`
-
-```mermaid
-flowchart TD
-  A["(user) 输入命令"] --> B["(interface) 调用 daemon status"]
-  B --> C["(daemon) 按 workspace 进程名扫描进程"]
-  C --> D["(interface) 展示 running、pid、日志和 settings 路径"]
-```
-
-## 10. `/lark server stop`
-
-```mermaid
-flowchart TD
-  A["(user) 输入命令"] --> B["(interface) 调用 daemon stop"]
-  B --> C["(daemon) 按 workspace 进程名停止 server"]
-  C --> D["(interface) 展示停止的 pid 和日志路径"]
-```
-
-## 11. `/note add`
-
-```mermaid
-flowchart TD
-  A["(user) 输入命令"] --> B["(interface) 请求用户在 Claude Code 回复 note Markdown"]
-  B --> C["(user) 回复 note 内容"]
-  C --> D["(interface) 提取 note 内容"]
-  D --> E["(api) kb.note.add"]
-  E --> F["(interface) 展示 note ID"]
-```
-
-## 12. `/note deprecate <note-id>`
-
-```mermaid
-flowchart TD
-  A["(user) 输入 note ID 和原因"] --> B["(interface) 请求确认"]
-  B --> C{"(user) 确认"}
-  C -- 否 --> D["(interface) 取消"]
-  C -- 是 --> E["(api) kb.note.deprecate"]
-  E --> F["(interface) 展示结果"]
-```
-
-## 13. `/note list`
-
-```mermaid
-flowchart TD
-  A["(user) 输入命令"] --> B["(interface) 定位 note index"]
-  B --> C["(interface) 用 Claude Code 展示 note index"]
-```
-
-## 14. `/note view <note-id>`
-
-```mermaid
-flowchart TD
-  A["(user) 输入 note ID"] --> B["(api) kb.note.get"]
-  B --> C["(interface) 用 Claude Code 展示 note Markdown"]
-```
-
-## 15. `/source add <path>`
-
-```mermaid
-flowchart TD
-  A["(user) 输入目录/文件/URL"] --> B["(interface) 原样传递输入；URL 不自行下载或导出"]
-  B --> C["(api) kb.source.add"]
-  C --> D["(interface) 接管 source ingest needs_llm 并 resume"]
-  D --> E["(api) kb.candidate.create"]
-  E --> F["(interface) 接管 candidate create needs_llm：先读 knowledgebase 定义再读 source 内容"]
-  F --> G["(interface) resume 后展示 source summary/tags、candidate ID、bindto 和 outline 修改建议"]
-```
-
-## 16. `/source deprecate <source-id>`
-
-```mermaid
-flowchart TD
-  A["(user) 输入 source ID 和原因"] --> B["(interface) 展示废弃影响确认"]
-  B --> C{"(user) 确认"}
-  C -- 否 --> D["(interface) 取消"]
-  C -- 是 --> E["(api) kb.source.deprecate"]
-  E --> F["(interface) 展示废弃结果"]
-```
+Read-only display may use indexes for locating and displaying objects, but indexes
+are not factual evidence and must not be written back into object facts.
