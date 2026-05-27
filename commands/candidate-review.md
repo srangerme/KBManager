@@ -60,7 +60,8 @@ Accept Claude Code flow:
        quote: <supporting quote>
    bindto:
      - kb_id: <knowledgebase ID>
-       outline_node: <outline node ID or path>
+       outline_id: <outline ID>
+       node_id: <outline node ID>
        reason: <binding reason>
    ---
 
@@ -91,7 +92,7 @@ Hard rules:
 - Every status-changing branch is a user review and must pass `reviewed_by`.
 - For `accept` and `merge`, never call the write API until the user has replied in Claude Code with approval or reviewed content.
 - Reviewed `evidence` is part of the accept/merge payload and must remain traceable to the candidate's source evidence.
-- Reviewed `bindto` must be `[]` when there is no knowledgebase binding. When present, each item must include an existing `kb_id`, an existing `outline_node`, and a binding reason.
+- Reviewed `bindto` must be `[]` when there is no knowledgebase binding. When present, each item must include an existing `kb_id`, an existing `outline_id`, an existing `node_id`, and a binding reason.
 - If the candidate includes `outline_change_suggestions`, show them to the user and ask whether to proceed without changing outline. This command must not modify knowledgebase outline directly and accept/merge APIs must not update outline.
 - Never edit candidate or knowledge files directly.
 - Never use index content as a fact source.

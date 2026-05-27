@@ -19,6 +19,9 @@ DOCUMENTED_COMMANDS = [
     "knowledgebase-create.md",
     "knowledgebase-list.md",
     "knowledgebase-map.md",
+    "knowledgebase-outline-archive.md",
+    "knowledgebase-outline-create.md",
+    "knowledgebase-outline-set-default.md",
     "lark-server-start.md",
     "lark-server-status.md",
     "lark-server-stop.md",
@@ -42,8 +45,15 @@ COMMAND_REQUIRED_FIELDS = {
         "title",
         "input_path",
         "review",
-        "reviewed_payload",
+        "description",
+        "tags",
+        "scope",
+        "default_outline_id",
+        "outlines",
     ],
+    "knowledgebase-outline-create.md": ["knowledgebase_id", "input_path", "outline", "review"],
+    "knowledgebase-outline-set-default.md": ["knowledgebase_id", "outline_id", "review"],
+    "knowledgebase-outline-archive.md": ["knowledgebase_id", "outline_id", "review"],
 }
 
 COMMAND_OPTIONAL_FIELDS = {
@@ -52,6 +62,9 @@ COMMAND_OPTIONAL_FIELDS = {
     "candidate-review.md": ["candidate_id", "reason", "merge_targets"],
     "note-add.md": ["title"],
     "knowledgebase-create.md": ["knowledgebase_id"],
+    "knowledgebase-outline-create.md": ["knowledgebase_id", "input_path"],
+    "knowledgebase-outline-set-default.md": ["knowledgebase_id", "outline_id"],
+    "knowledgebase-outline-archive.md": ["knowledgebase_id", "outline_id"],
     "knowledgebase-list.md": ["knowledgebase_id"],
     "knowledgebase-map.md": ["knowledgebase_id"],
 }
@@ -63,12 +76,18 @@ WRITE_COMMANDS = {
     "note-add.md",
     "note-deprecate.md",
     "knowledgebase-create.md",
+    "knowledgebase-outline-create.md",
+    "knowledgebase-outline-set-default.md",
+    "knowledgebase-outline-archive.md",
 }
 
 CLAUDE_REVIEW_COMMANDS = {
     "candidate-review.md",
     "note-add.md",
     "knowledgebase-create.md",
+    "knowledgebase-outline-create.md",
+    "knowledgebase-outline-set-default.md",
+    "knowledgebase-outline-archive.md",
 }
 
 READ_ONLY_DISPLAY_COMMANDS = {

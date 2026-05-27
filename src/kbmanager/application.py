@@ -37,7 +37,9 @@ KNOWLEDGE_REJECT_OPERATION = "kb.knowledge.reject"
 KNOWLEDGE_MERGE_OPERATION = "kb.knowledge.merge"
 KNOWLEDGE_DEPRECATE_OPERATION = "kb.knowledge.deprecate"
 KNOWLEDGEBASE_CREATE_OPERATION = "kb.knowledgebase.create"
-KNOWLEDGEBASE_INIT_OPERATION = "kb.knowledgebase.init"
+KNOWLEDGEBASE_OUTLINE_CREATE_OPERATION = "kb.knowledgebase.outline.create"
+KNOWLEDGEBASE_OUTLINE_SET_DEFAULT_OPERATION = "kb.knowledgebase.outline.set_default"
+KNOWLEDGEBASE_OUTLINE_ARCHIVE_OPERATION = "kb.knowledgebase.outline.archive"
 KNOWLEDGEBASE_MAP_OPERATION = "kb.knowledgebase.map"
 NOTE_ADD_OPERATION = "kb.note.add"
 NOTE_GET_OPERATION = "kb.note.get"
@@ -187,7 +189,8 @@ INDEX_MARKDOWN_PATHS = (
 INDEX_YAML_PATHS: tuple[str, ...] = ()
 BINDTO_SHAPE = (
     "bindto must be [] when there are no knowledgebase bindings, or mappings like "
-    "{'kb_id': 'kb-YYYYMMDD-001-title', 'outline_node': 'node-id', "
+    "{'kb_id': 'kb-YYYYMMDD-001-title', 'outline_id': 'outline-id', "
+    "'node_id': 'node-id', "
     "'reason': 'reviewed binding reason'}"
 )
 EVIDENCE_SHAPE = (
@@ -499,7 +502,7 @@ def candidate_create(
                 "must_preserve_upstream_refs",
                 "must_include_evidence",
                 "must_not_create_accepted_knowledge",
-                "must_use_existing_outline_nodes_for_bindto",
+                "must_use_existing_outline_id_and_node_id_for_bindto",
             ],
             token_payload={**token_payload, "active_knowledgebases": active_kbs},
             warnings=warnings,
@@ -966,10 +969,20 @@ def knowledgebase_create(
     root: str | Path = ".",
     *,
     title: str,
+    description: str | None = None,
+    tags: list[str] | None = None,
+    scope: dict[str, Any] | None = None,
+    default_outline_id: str | None = None,
+    outlines: list[dict[str, Any]] | None = None,
+    review: dict[str, Any] | None = None,
+    reviewed_by: str | None = None,
     knowledgebase_id: str | None = None,
     dry_run: bool = False,
 ) -> ApiResult:
-    """Create a minimal initializing knowledge base shell."""
+    """Create a reviewed active knowledge base and its outline YAML file."""
+
+    if not _review_approved(review):
+        return _needs_review(KNOWLEDGEBASE_CREATE_OPERATION, ["approve", "revise", "reject"])
 
     try:
         workspace = Workspace(root)
@@ -979,70 +992,100 @@ def knowledgebase_create(
             title=title,
             knowledgebase_id=knowledgebase_id,
         )
+        payload = _validate_knowledgebase_create_payload(
+            {
+                "description": description,
+                "tags": tags or [],
+                "scope": scope,
+                "default_outline_id": default_outline_id,
+                "outlines": outlines,
+            }
+        )
         today = _today()
         kb_id = knowledgebase_id or _next_titled_id(repository, "kb", title)
         relative_path = f"knowledge/bases/{kb_id}.md"
+        outlines_relative_path = _default_outlines_file(relative_path)
         if workspace.resolve(relative_path).exists():
             raise RepositoryError(f"knowledge base path already exists: {relative_path}")
+        if workspace.resolve(outlines_relative_path).exists():
+            raise RepositoryError(f"knowledgebase outlines file already exists: {outlines_relative_path}")
+        outline_document = _outlines_document(
+            kb_id,
+            payload["default_outline_id"],
+            payload["outlines"],
+        )
+        manifest = _outline_manifest(outline_document["outlines"])
         frontmatter = {
             "id": kb_id,
             "type": "knowledge-base",
             "title": title.strip(),
-            "status": "initializing",
-            "description": "",
-            "tags": [],
-            "scope": {"includes": [], "excludes": []},
-            "outline": [],
-            "reviewed_at": None,
-            "review_decision": None,
+            "status": "active",
+            "description": payload["description"],
+            "tags": payload["tags"],
+            "scope": payload["scope"],
+            "default_outline_id": payload["default_outline_id"],
+            "outlines_file": outlines_relative_path,
+            "outlines": manifest,
+            "reviewed_by": reviewed_by,
+            "reviewed_at": str((review or {}).get("reviewed_at") or today),
+            "review_decision": "approve",
             "created": today,
             "updated": today,
         }
         document = MarkdownDocument(
             frontmatter=frontmatter,
-            body=_knowledgebase_body("", {"includes": [], "excludes": []}, []),
+            body=_knowledgebase_body(payload["description"], payload["scope"], manifest),
         )
-        diffs = [{"action": "create", "kind": "knowledge-base", "path": relative_path}]
+        diffs = [
+            {"action": "create", "kind": "knowledge-base", "path": relative_path},
+            {"action": "create", "kind": "knowledgebase-outlines", "path": outlines_relative_path},
+        ]
         if dry_run:
             return ApiResult.success(
                 KNOWLEDGEBASE_CREATE_OPERATION,
-                objects=ObjectChanges(created=[relative_path]),
+                objects=ObjectChanges(created=[relative_path, outlines_relative_path]),
                 diffs=diffs,
-                extra={"knowledgebase_id": kb_id, "path": relative_path},
+                extra={
+                    "knowledgebase_id": kb_id,
+                    "path": relative_path,
+                    "outlines_file": outlines_relative_path,
+                },
             )
         repository.write_markdown(relative_path, document)
+        _write_yaml_file(workspace, outlines_relative_path, outline_document)
     except (KBManagerError, OSError) as exc:
         return _failed(
             KNOWLEDGEBASE_CREATE_OPERATION,
             "knowledgebase_create_failed",
             str(exc),
-            "Provide a unique reviewed knowledge base title and optional ID.",
+            "Provide a reviewed knowledgebase payload with description, scope, and outlines.",
         )
 
     return _success_with_index_rebuild(
         workspace.root,
         KNOWLEDGEBASE_CREATE_OPERATION,
-        objects=ObjectChanges(created=[relative_path]),
+        objects=ObjectChanges(created=[relative_path, outlines_relative_path]),
         diffs=diffs,
-        extra={"knowledgebase_id": kb_id, "path": relative_path},
+        extra={
+            "knowledgebase_id": kb_id,
+            "path": relative_path,
+            "outlines_file": outlines_relative_path,
+        },
     )
 
 
-def knowledgebase_init(
+def knowledgebase_outline_create(
     root: str | Path = ".",
     *,
     knowledgebase_id: str,
-    input_path: str | Path,
-    resume_token: str | None = None,
-    llm_result: dict[str, Any] | None = None,
+    outline: dict[str, Any],
     review: dict[str, Any] | None = None,
-    reviewed_payload: dict[str, Any] | None = None,
     dry_run: bool = False,
 ) -> ApiResult:
-    """Initialize a knowledge base from temporary source-like context."""
+    """Create a new outline for an active knowledge base."""
 
-    input_text = str(input_path)
-    token_payload = {"knowledgebase_id": knowledgebase_id, "input_path": input_text}
+    if not _review_approved(review):
+        return _needs_review(KNOWLEDGEBASE_OUTLINE_CREATE_OPERATION, ["approve", "revise", "reject"])
     try:
         workspace = Workspace(root)
         repository = ObjectRepository(workspace)
@@ -1051,112 +1094,224 @@ def knowledgebase_init(
             knowledgebase_id,
             expected_type="knowledge-base",
         )
-        if kb_record.status == "archived":
+        if kb_record.status != "active":
             raise RepositoryError(f"knowledgebase is archived: {knowledgebase_id}")
-        context = _knowledgebase_init_context(workspace, input_path)
-    except (KBManagerError, OSError) as exc:
-        return _failed(
-            KNOWLEDGEBASE_INIT_OPERATION,
-            "knowledgebase_init_failed",
-            str(exc),
-            "Provide an existing non-archived knowledgebase and readable input.",
-        )
-
-    if resume_token is None:
-        return _needs_llm(
-            KNOWLEDGEBASE_INIT_OPERATION,
-            purpose="knowledgebase_create",
-            system_prompt="knowledgebase-create",
-            required_context=[input_text],
-            output_schema="knowledgebase_create_draft",
-            constraints=[
-                "temporary_input_only",
-                "must_not_create_source_objects",
-                "requires_user_review_before_write",
-            ],
-            token_payload={**token_payload, "context": context},
-        )
-
-    if resume_token != _resume_token(
-        KNOWLEDGEBASE_INIT_OPERATION,
-        {**token_payload, "context": context},
-    ):
-        return _failed(
-            KNOWLEDGEBASE_INIT_OPERATION,
-            "invalid_resume_token",
-            "Resume token does not match this knowledgebase.init request.",
-            "Restart kb.knowledgebase.init and use the returned resume token.",
-        )
-
-    if not _review_approved(review):
-        try:
-            draft = _validate_knowledgebase_init_payload(llm_result)
-        except (KBManagerError, OSError) as exc:
-            return _failed(
-                KNOWLEDGEBASE_INIT_OPERATION,
-                "invalid_knowledgebase_draft",
-                str(exc),
-                "Return description, tags, scope, and outline for user review.",
-            )
-        return ApiResult(
-            status=ApiStatus.NEEDS_REVIEW,
-            operation=KNOWLEDGEBASE_INIT_OPERATION,
-            review=ReviewRequest(required=True, options=["approve", "reject", "revise"]),
-            next_actions=["Review the knowledgebase draft, then resume with approved payload."],
-            extra={
-                "draft": draft,
-                "resume": {
-                    "operation": KNOWLEDGEBASE_INIT_OPERATION,
-                    "token": resume_token,
-                },
-            },
-        )
-
-    try:
-        payload = _validate_knowledgebase_init_payload(reviewed_payload)
+        outline = _validate_single_outline(outline)
         document = repository.read_markdown(workspace.relative(kb_record.path))
         today = _today()
         frontmatter = dict(document.frontmatter)
+        outlines_document = _read_outlines_file(workspace, kb_record)
+        existing_ids = {item["id"] for item in outlines_document["outlines"]}
+        if outline["id"] in existing_ids:
+            raise RepositoryError(f"outline already exists: {outline['id']}")
+        outlines_document["outlines"].append(outline)
         frontmatter.update(
             {
-                "status": "active",
-                "description": payload["description"],
-                "tags": payload["tags"],
-                "scope": payload["scope"],
-                "outline": payload["outline"],
-                "reviewed_at": str((review or {}).get("reviewed_at") or today),
-                "review_decision": "approve",
+                "outlines": _outline_manifest(outlines_document["outlines"]),
                 "updated": today,
             }
         )
         relative_path = str(workspace.relative(kb_record.path))
+        outlines_relative_path = _outlines_file_for_record(workspace, kb_record)
         updated_document = MarkdownDocument(
             frontmatter=frontmatter,
-            body=_knowledgebase_body(payload["description"], payload["scope"], payload["outline"]),
+            body=_knowledgebase_body(
+                str(frontmatter.get("description", "")),
+                dict(frontmatter.get("scope", {})),
+                frontmatter["outlines"],
+            ),
         )
-        diffs = [{"action": "update", "kind": "knowledge-base", "path": relative_path}]
+        diffs = [
+            {"action": "update", "kind": "knowledge-base", "path": relative_path},
+            {"action": "update", "kind": "knowledgebase-outlines", "path": outlines_relative_path},
+        ]
         if dry_run:
             return ApiResult.success(
-                KNOWLEDGEBASE_INIT_OPERATION,
-                objects=ObjectChanges(updated=[relative_path]),
+                KNOWLEDGEBASE_OUTLINE_CREATE_OPERATION,
+                objects=ObjectChanges(updated=[relative_path, outlines_relative_path]),
                 diffs=diffs,
-                extra={"knowledgebase_id": knowledgebase_id, "path": relative_path},
+                extra={
+                    "knowledgebase_id": knowledgebase_id,
+                    "outline_id": outline["id"],
+                    "path": relative_path,
+                    "outlines_file": outlines_relative_path,
+                },
             )
         repository.write_markdown(relative_path, updated_document, overwrite=True)
+        _write_yaml_file(workspace, outlines_relative_path, outlines_document, overwrite=True)
     except (KBManagerError, OSError) as exc:
         return _failed(
-            KNOWLEDGEBASE_INIT_OPERATION,
-            "knowledgebase_init_failed",
+            KNOWLEDGEBASE_OUTLINE_CREATE_OPERATION,
+            "knowledgebase_outline_create_failed",
             str(exc),
-            "Provide an approved reviewed payload with description, tags, scope, and outline.",
+            "Provide an active knowledgebase ID and a reviewed outline payload.",
         )
 
     return _success_with_index_rebuild(
         workspace.root,
-        KNOWLEDGEBASE_INIT_OPERATION,
-        objects=ObjectChanges(updated=[relative_path]),
+        KNOWLEDGEBASE_OUTLINE_CREATE_OPERATION,
+        objects=ObjectChanges(updated=[relative_path, outlines_relative_path]),
         diffs=diffs,
-        extra={"knowledgebase_id": knowledgebase_id, "path": relative_path},
+        extra={
+            "knowledgebase_id": knowledgebase_id,
+            "outline_id": outline["id"],
+            "path": relative_path,
+            "outlines_file": outlines_relative_path,
+        },
+    )
+
+
+def knowledgebase_outline_set_default(
+    root: str | Path = ".",
+    *,
+    knowledgebase_id: str,
+    outline_id: str,
+    review: dict[str, Any] | None = None,
+    dry_run: bool = False,
+) -> ApiResult:
+    """Set the default outline for an active knowledge base."""
+
+    if not _review_approved(review):
+        return _needs_review(
+            KNOWLEDGEBASE_OUTLINE_SET_DEFAULT_OPERATION,
+            ["approve", "revise", "reject"],
+        )
+    try:
+        workspace = Workspace(root)
+        repository = ObjectRepository(workspace)
+        kb_record = _find_single_object(repository, knowledgebase_id, expected_type="knowledge-base")
+        if kb_record.status != "active":
+            raise RepositoryError(f"knowledgebase must be active: {knowledgebase_id}")
+        document = repository.read_markdown(workspace.relative(kb_record.path))
+        outlines_document = _read_outlines_file(workspace, kb_record)
+        outline = _outline_by_id(outlines_document, outline_id)
+        if outline.get("status") != "active":
+            raise RepositoryError(f"default outline must be active: {outline_id}")
+        today = _today()
+        outlines_document["default_outline_id"] = outline_id
+        frontmatter = dict(document.frontmatter)
+        frontmatter.update({"default_outline_id": outline_id, "updated": today})
+        relative_path = str(workspace.relative(kb_record.path))
+        outlines_relative_path = _outlines_file_for_record(workspace, kb_record)
+        updated_document = MarkdownDocument(
+            frontmatter=frontmatter,
+            body=_knowledgebase_body(
+                str(frontmatter.get("description", "")),
+                dict(frontmatter.get("scope", {})),
+                frontmatter.get("outlines", []),
+            ),
+        )
+        diffs = [
+            {"action": "update", "kind": "knowledge-base", "path": relative_path},
+            {"action": "update", "kind": "knowledgebase-outlines", "path": outlines_relative_path},
+        ]
+        if dry_run:
+            return ApiResult.success(
+                KNOWLEDGEBASE_OUTLINE_SET_DEFAULT_OPERATION,
+                objects=ObjectChanges(updated=[relative_path, outlines_relative_path]),
+                diffs=diffs,
+                extra={"knowledgebase_id": knowledgebase_id, "outline_id": outline_id},
+            )
+        repository.write_markdown(relative_path, updated_document, overwrite=True)
+        _write_yaml_file(workspace, outlines_relative_path, outlines_document, overwrite=True)
+    except (KBManagerError, OSError) as exc:
+        return _failed(
+            KNOWLEDGEBASE_OUTLINE_SET_DEFAULT_OPERATION,
+            "knowledgebase_outline_set_default_failed",
+            str(exc),
+            "Provide an active knowledgebase ID and an active outline ID.",
+        )
+    return _success_with_index_rebuild(
+        workspace.root,
+        KNOWLEDGEBASE_OUTLINE_SET_DEFAULT_OPERATION,
+        objects=ObjectChanges(updated=[relative_path, outlines_relative_path]),
+        diffs=diffs,
+        extra={"knowledgebase_id": knowledgebase_id, "outline_id": outline_id},
+    )
+
+
+def knowledgebase_outline_archive(
+    root: str | Path = ".",
+    *,
+    knowledgebase_id: str,
+    outline_id: str,
+    review: dict[str, Any] | None = None,
+    allow_existing_bindings: bool = False,
+    dry_run: bool = False,
+) -> ApiResult:
+    """Archive a non-default outline."""
+
+    if not _review_approved(review):
+        return _needs_review(
+            KNOWLEDGEBASE_OUTLINE_ARCHIVE_OPERATION,
+            ["approve", "revise", "reject"],
+        )
+    try:
+        workspace = Workspace(root)
+        repository = ObjectRepository(workspace)
+        kb_record = _find_single_object(repository, knowledgebase_id, expected_type="knowledge-base")
+        if kb_record.status != "active":
+            raise RepositoryError(f"knowledgebase must be active: {knowledgebase_id}")
+        document = repository.read_markdown(workspace.relative(kb_record.path))
+        outlines_document = _read_outlines_file(workspace, kb_record)
+        if outlines_document.get("default_outline_id") == outline_id:
+            raise RepositoryError("cannot archive the default outline; set another default first")
+        outline = _outline_by_id(outlines_document, outline_id)
+        bound = _knowledge_bound_to_outline(repository, knowledgebase_id, outline_id)
+        if bound and not allow_existing_bindings:
+            raise RepositoryError(
+                "outline has existing knowledge bindings: " + ", ".join(sorted(bound))
+            )
+        today = _today()
+        outline["status"] = "archived"
+        frontmatter = dict(document.frontmatter)
+        frontmatter.update(
+            {"outlines": _outline_manifest(outlines_document["outlines"]), "updated": today}
+        )
+        relative_path = str(workspace.relative(kb_record.path))
+        outlines_relative_path = _outlines_file_for_record(workspace, kb_record)
+        updated_document = MarkdownDocument(
+            frontmatter=frontmatter,
+            body=_knowledgebase_body(
+                str(frontmatter.get("description", "")),
+                dict(frontmatter.get("scope", {})),
+                frontmatter["outlines"],
+            ),
+        )
+        diffs = [
+            {"action": "update", "kind": "knowledge-base", "path": relative_path},
+            {"action": "update", "kind": "knowledgebase-outlines", "path": outlines_relative_path},
+        ]
+        if dry_run:
+            return ApiResult.success(
+                KNOWLEDGEBASE_OUTLINE_ARCHIVE_OPERATION,
+                objects=ObjectChanges(updated=[relative_path, outlines_relative_path]),
+                diffs=diffs,
+                extra={
+                    "knowledgebase_id": knowledgebase_id,
+                    "outline_id": outline_id,
+                    "bound_knowledge": sorted(bound),
+                },
+            )
+        repository.write_markdown(relative_path, updated_document, overwrite=True)
+        _write_yaml_file(workspace, outlines_relative_path, outlines_document, overwrite=True)
+    except (KBManagerError, OSError) as exc:
+        return _failed(
+            KNOWLEDGEBASE_OUTLINE_ARCHIVE_OPERATION,
+            "knowledgebase_outline_archive_failed",
+            str(exc),
+            "Provide a non-default outline ID and resolve existing bindings if needed.",
+        )
+    return _success_with_index_rebuild(
+        workspace.root,
+        KNOWLEDGEBASE_OUTLINE_ARCHIVE_OPERATION,
+        objects=ObjectChanges(updated=[relative_path, outlines_relative_path]),
+        diffs=diffs,
+        extra={
+            "knowledgebase_id": knowledgebase_id,
+            "outline_id": outline_id,
+            "bound_knowledge": sorted(bound),
+        },
     )
 
 
@@ -1542,7 +1697,7 @@ def _knowledgebase_map_markdown(
         for record in _records_by_type(visible_records, "knowledge")
         if record.status == "accepted"
     ]
-    issues = _bindto_consistency_issues(knowledgebases, knowledge)
+    issues = _bindto_consistency_issues(knowledgebases, knowledge, workspace)
 
     title = (
         "Knowledgebase Map"
@@ -1560,7 +1715,10 @@ def _knowledgebase_map_markdown(
     for kb_record in knowledgebases:
         kb_node = _mermaid_node_id(kb_record.object_id)
         lines.append(f"  {kb_node}[\"{_mermaid_label(kb_record)}\"]")
-        outline_nodes = _outline_nodes_with_labels(kb_record.metadata.get("outline", []))
+        outlines_document = _read_outlines_file(workspace, kb_record)
+        default_outline_id = kb_record.metadata.get("default_outline_id")
+        outline = _outline_by_id(outlines_document, str(default_outline_id))
+        outline_nodes = _outline_nodes_with_labels(outline.get("nodes", []))
         for node_id, label, parent_id in outline_nodes:
             outline_node = _mermaid_node_id(f"{kb_record.object_id}-{node_id}")
             label_text = (
@@ -1580,8 +1738,10 @@ def _knowledgebase_map_markdown(
                     continue
                 knowledge_node = _mermaid_node_id(knowledge_record.object_id)
                 lines.append(f"  {knowledge_node}[\"{_mermaid_label(knowledge_record)}\"]")
+                if binding.get("outline_id") != default_outline_id:
+                    continue
                 outline_node = _mermaid_node_id(
-                    f"{kb_record.object_id}-{binding.get('outline_node')}"
+                    f"{kb_record.object_id}-{binding.get('node_id')}"
                 )
                 lines.append(f"  {outline_node} --> {knowledge_node}")
     lines.extend(["```", ""])
@@ -1947,6 +2107,8 @@ def _consistency_issues(records: list[ObjectRecord], workspace: Workspace) -> li
 
     for record in records:
         _append_reference_issues(record, by_id, issues)
+        if record.object_type == "knowledge-base":
+            _append_knowledgebase_outline_issues(record, workspace, issues)
     knowledgebases = [
         record
         for record in records
@@ -1957,8 +2119,35 @@ def _consistency_issues(records: list[ObjectRecord], workspace: Workspace) -> li
         for record in records
         if record.object_type == "knowledge" and record.status == "accepted"
     ]
-    issues.extend(_bindto_consistency_issues(knowledgebases, knowledge))
+    issues.extend(_bindto_consistency_issues(knowledgebases, knowledge, workspace))
     return issues
+
+
+def _append_knowledgebase_outline_issues(
+    record: ObjectRecord,
+    workspace: Workspace,
+    issues: list[dict[str, str]],
+) -> None:
+    if "outline" in record.metadata:
+        issues.append(
+            {
+                "code": "legacy_outline_field",
+                "object_id": record.object_id,
+                "field": "outline",
+                "message": f"{record.object_id} uses legacy outline frontmatter",
+            }
+        )
+    try:
+        _read_outlines_file(workspace, record)
+    except RepositoryError as exc:
+        issues.append(
+            {
+                "code": "invalid_outlines_file",
+                "object_id": record.object_id,
+                "field": "outlines_file",
+                "message": str(exc),
+            }
+        )
 
 
 def _append_reference_issues(
@@ -1989,9 +2178,11 @@ def _append_reference_issues(
 def _bindto_consistency_issues(
     knowledgebases: list[ObjectRecord],
     knowledge: list[ObjectRecord],
+    workspace: Workspace,
 ) -> list[dict[str, str]]:
     issues: list[dict[str, str]] = []
     kb_by_id = {record.object_id: record for record in knowledgebases}
+    outline_docs: dict[str, dict[str, Any]] = {}
     for record in knowledge:
         bindto = record.metadata.get("bindto", [])
         if not isinstance(bindto, list):
@@ -2016,7 +2207,19 @@ def _bindto_consistency_issues(
                 )
                 continue
             kb_id = item.get("kb_id")
-            outline_node = item.get("outline_node")
+            outline_id = item.get("outline_id")
+            node_id = item.get("node_id")
+            if "outline_node" in item:
+                issues.append(
+                    {
+                        "code": "legacy_outline_node_field",
+                        "object_id": record.object_id,
+                        "field": "bindto",
+                        "target_id": str(item.get("outline_node")),
+                        "message": f"{record.object_id}.bindto uses legacy outline_node",
+                    }
+                )
+                continue
             if not isinstance(kb_id, str) or kb_id not in kb_by_id:
                 issues.append(
                     {
@@ -2031,18 +2234,63 @@ def _bindto_consistency_issues(
                     }
                 )
                 continue
-            if not isinstance(outline_node, str) or outline_node not in _outline_node_ids(
-                kb_by_id[kb_id].metadata.get("outline", [])
-            ):
+            if not isinstance(outline_id, str) or not outline_id.strip():
                 issues.append(
                     {
-                        "code": "invalid_bindto_outline_node",
+                        "code": "invalid_bindto_outline_id",
                         "object_id": record.object_id,
                         "field": "bindto",
-                        "target_id": str(outline_node),
+                        "target_id": str(outline_id),
+                        "message": f"{record.object_id}.bindto missing outline_id",
+                    }
+                )
+                continue
+            if not isinstance(node_id, str) or not node_id.strip():
+                issues.append(
+                    {
+                        "code": "invalid_bindto_node_id",
+                        "object_id": record.object_id,
+                        "field": "bindto",
+                        "target_id": str(node_id),
+                        "message": f"{record.object_id}.bindto missing node_id",
+                    }
+                )
+                continue
+            try:
+                if kb_id not in outline_docs:
+                    outline_docs[kb_id] = _read_outlines_file(workspace, kb_by_id[kb_id])
+                outline = _outline_by_id(outline_docs[kb_id], outline_id)
+            except RepositoryError as exc:
+                issues.append(
+                    {
+                        "code": "invalid_bindto_outline_id",
+                        "object_id": record.object_id,
+                        "field": "bindto",
+                        "target_id": str(outline_id),
+                        "message": str(exc),
+                    }
+                )
+                continue
+            if outline.get("status") == "archived":
+                issues.append(
+                    {
+                        "code": "bindto_archived_outline",
+                        "object_id": record.object_id,
+                        "field": "bindto",
+                        "target_id": outline_id,
+                        "message": f"{record.object_id}.bindto references archived outline {outline_id}",
+                    }
+                )
+            if node_id not in _outline_node_ids(outline.get("nodes", [])):
+                issues.append(
+                    {
+                        "code": "invalid_bindto_node_id",
+                        "object_id": record.object_id,
+                        "field": "bindto",
+                        "target_id": node_id,
                         "message": (
-                            f"{record.object_id}.bindto references missing outline node "
-                            f"{outline_node}"
+                            f"{record.object_id}.bindto references missing node "
+                            f"{kb_id}/{outline_id}/{node_id}"
                         ),
                     }
                 )
@@ -2435,42 +2683,30 @@ def _validate_knowledgebase_input(
             raise RepositoryError(f"knowledge base title already exists: {title.strip()}")
 
 
-def _knowledgebase_body(description: str, scope: dict[str, Any], outline: Any) -> str:
+def _knowledgebase_body(description: str, scope: dict[str, Any], outlines: Any) -> str:
     scope_text = yaml.safe_dump(scope, sort_keys=False, allow_unicode=True).strip()
-    outline_text = yaml.safe_dump(outline, sort_keys=False, allow_unicode=True).strip()
+    outlines_text = yaml.safe_dump(outlines, sort_keys=False, allow_unicode=True).strip()
     return (
         f"\n## Description\n\n{description.strip()}\n\n"
         f"## Scope\n\n```yaml\n{scope_text}\n```\n\n"
-        f"## Outline\n\n```yaml\n{outline_text}\n```\n\n"
+        f"## Outlines\n\n```yaml\n{outlines_text}\n```\n\n"
         "## Derived Member View\n"
     )
 
 
-def _knowledgebase_init_context(workspace: Workspace, input_path: str | Path) -> dict[str, str]:
-    input_text = str(input_path)
-    if _is_supported_source_url(input_text):
-        try:
-            return {"input_path": input_text, "content": _download_url_as_html(input_text)}
-        except RepositoryError:
-            pdf_path = _download_url_as_temporary_pdf(input_text)
-            return {"input_path": input_text, "content": f"Captured PDF: {pdf_path}"}
-    path = _resolve_local_source_input(workspace, input_path)
-    if path.suffix.lower() == ".md":
-        return {"input_path": str(input_path), "content": path.read_text(encoding="utf-8")}
-    return {"input_path": str(input_path), "content": f"Input file: {path}"}
-
-
-def _validate_knowledgebase_init_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+def _validate_knowledgebase_create_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise RepositoryError(
-            "knowledgebase init payload must include description, tags, scope, and outline"
+            "knowledgebase create payload must include description, tags, scope, "
+            "default_outline_id, and outlines"
         )
     if "frontmatter" in payload and isinstance(payload["frontmatter"], dict):
         payload = payload["frontmatter"]
     description = payload.get("description")
     tags = payload.get("tags", [])
     scope = payload.get("scope")
-    outline = payload.get("outline")
+    default_outline_id = payload.get("default_outline_id")
+    outlines = payload.get("outlines")
     if not isinstance(description, str) or not description.strip():
         raise RepositoryError("knowledgebase description must be a non-empty string")
     if not _is_string_list(tags):
@@ -2479,14 +2715,196 @@ def _validate_knowledgebase_init_payload(payload: dict[str, Any] | None) -> dict
         raise RepositoryError("knowledgebase scope must be a mapping with includes/excludes")
     if not _is_string_list(scope.get("includes")) or not _is_string_list(scope.get("excludes")):
         raise RepositoryError("knowledgebase scope.includes and scope.excludes must be lists")
-    if not isinstance(outline, list):
-        raise RepositoryError("knowledgebase outline must be a list")
+    if not isinstance(default_outline_id, str) or not default_outline_id.strip():
+        raise RepositoryError("knowledgebase default_outline_id must be a non-empty string")
+    outlines = _validate_outlines(outlines, default_outline_id.strip())
     return {
         "description": description.strip(),
         "tags": tags,
         "scope": {"includes": scope["includes"], "excludes": scope["excludes"]},
-        "outline": outline,
+        "default_outline_id": default_outline_id.strip(),
+        "outlines": outlines,
     }
+
+
+def _validate_outlines(outlines: Any, default_outline_id: str) -> list[dict[str, Any]]:
+    if not isinstance(outlines, list) or not outlines:
+        raise RepositoryError("knowledgebase outlines must be a non-empty list")
+    result: list[dict[str, Any]] = []
+    seen_outline_ids: set[str] = set()
+    active_outline_ids: set[str] = set()
+    for item in outlines:
+        outline = _validate_single_outline(item)
+        outline_id = outline["id"]
+        if outline_id in seen_outline_ids:
+            raise RepositoryError(f"duplicate outline id: {outline_id}")
+        seen_outline_ids.add(outline_id)
+        if outline["status"] == "active":
+            active_outline_ids.add(outline_id)
+        result.append(outline)
+    if default_outline_id not in active_outline_ids:
+        raise RepositoryError("default_outline_id must reference an active outline")
+    return result
+
+
+def _validate_single_outline(outline: Any) -> dict[str, Any]:
+    if not isinstance(outline, dict):
+        raise RepositoryError("outline must be a mapping")
+    outline_id = outline.get("id")
+    title = outline.get("title")
+    description = outline.get("description", "")
+    status = outline.get("status", "active")
+    nodes = outline.get("nodes", [])
+    if not isinstance(outline_id, str) or not outline_id.strip():
+        raise RepositoryError("outline.id must be a non-empty string")
+    if not isinstance(title, str) or not title.strip():
+        raise RepositoryError("outline.title must be a non-empty string")
+    if not isinstance(description, str):
+        raise RepositoryError("outline.description must be a string")
+    if status not in {"active", "draft", "archived"}:
+        raise RepositoryError("outline.status must be active, draft, or archived")
+    if not isinstance(nodes, list):
+        raise RepositoryError("outline.nodes must be a list")
+    _validate_outline_node_ids(nodes)
+    clean = dict(outline)
+    clean.update(
+        {
+            "id": outline_id.strip(),
+            "title": title.strip(),
+            "description": description,
+            "status": status,
+            "nodes": nodes,
+        }
+    )
+    return clean
+
+
+def _validate_outline_node_ids(nodes: list[Any]) -> None:
+    seen: set[str] = set()
+
+    def visit(node: Any) -> None:
+        if not isinstance(node, dict):
+            raise RepositoryError("outline nodes must be mappings with explicit id")
+        node_id = node.get("id")
+        if not isinstance(node_id, str) or not node_id.strip():
+            raise RepositoryError("outline node.id must be a non-empty string")
+        if node_id in seen:
+            raise RepositoryError(f"duplicate outline node id: {node_id}")
+        seen.add(node_id)
+        children = node.get("children", [])
+        if children is None:
+            return
+        if not isinstance(children, list):
+            raise RepositoryError("outline node.children must be a list")
+        for child in children:
+            visit(child)
+
+    for node in nodes:
+        visit(node)
+
+
+def _default_outlines_file(kb_relative_path: str) -> str:
+    path = Path(kb_relative_path)
+    return str(path.with_name(f"{path.stem}-outlines.yml"))
+
+
+def _outlines_document(
+    kb_id: str,
+    default_outline_id: str,
+    outlines: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "kb_id": kb_id,
+        "default_outline_id": default_outline_id,
+        "outlines": outlines,
+    }
+
+
+def _outline_manifest(outlines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": outline["id"],
+            "title": outline["title"],
+            "description": outline.get("description", ""),
+            "status": outline.get("status", "active"),
+        }
+        for outline in outlines
+    ]
+
+
+def _outlines_file_for_record(workspace: Workspace, record: ObjectRecord) -> str:
+    value = record.metadata.get("outlines_file")
+    if not isinstance(value, str) or not value.strip():
+        raise RepositoryError(f"{record.object_id} missing outlines_file")
+    expected = _default_outlines_file(str(workspace.relative(record.path)))
+    if value != expected:
+        raise RepositoryError(f"{record.object_id}.outlines_file must be {expected}")
+    return value
+
+
+def _read_outlines_file(workspace: Workspace, record: ObjectRecord) -> dict[str, Any]:
+    relative_path = _outlines_file_for_record(workspace, record)
+    path = workspace.resolve(relative_path)
+    if not path.exists():
+        raise RepositoryError(f"knowledgebase outlines file not found: {relative_path}")
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        raise RepositoryError(f"invalid outlines YAML in {relative_path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise RepositoryError(f"outlines file must contain a mapping: {relative_path}")
+    if data.get("kb_id") != record.object_id:
+        raise RepositoryError(f"outlines file kb_id mismatch for {record.object_id}")
+    default_outline_id = data.get("default_outline_id")
+    if default_outline_id != record.metadata.get("default_outline_id"):
+        raise RepositoryError(f"default_outline_id mismatch for {record.object_id}")
+    outlines = _validate_outlines(data.get("outlines"), str(default_outline_id))
+    manifest = _outline_manifest(outlines)
+    if manifest != record.metadata.get("outlines"):
+        raise RepositoryError(f"outline manifest mismatch for {record.object_id}")
+    return {"kb_id": record.object_id, "default_outline_id": default_outline_id, "outlines": outlines}
+
+
+def _write_yaml_file(
+    workspace: Workspace,
+    relative_path: str,
+    data: dict[str, Any],
+    *,
+    overwrite: bool = False,
+) -> None:
+    path = workspace.ensure_parent(relative_path)
+    if path.exists() and not overwrite:
+        raise RepositoryError(f"path already exists: {relative_path}")
+    text = yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+    _write_text_atomic_overwrite(path, text)
+
+
+def _outline_by_id(outlines_document: dict[str, Any], outline_id: str) -> dict[str, Any]:
+    if not isinstance(outline_id, str) or not outline_id.strip():
+        raise RepositoryError("outline_id must be a non-empty string")
+    for outline in outlines_document.get("outlines", []):
+        if isinstance(outline, dict) and outline.get("id") == outline_id:
+            return outline
+    raise RepositoryError(f"outline not found: {outline_id}")
+
+
+def _knowledge_bound_to_outline(
+    repository: ObjectRepository,
+    kb_id: str,
+    outline_id: str,
+) -> set[str]:
+    bound: set[str] = set()
+    for record in _all_records(repository):
+        if record.object_type != "knowledge" or record.status != "accepted":
+            continue
+        for item in record.metadata.get("bindto", []):
+            if (
+                isinstance(item, dict)
+                and item.get("kb_id") == kb_id
+                and item.get("outline_id") == outline_id
+            ):
+                bound.add(record.object_id)
+    return bound
 
 
 def _review_approved(review: dict[str, Any] | None) -> bool:
@@ -2529,25 +2947,18 @@ def _validate_reviewed_evidence_from_candidate(
 def _outline_node_ids(outline: Any) -> set[str]:
     ids: set[str] = set()
 
-    def visit(node: Any, path: str = "") -> None:
+    def visit(node: Any) -> None:
         if isinstance(node, dict):
-            node_id = node.get("id") or node.get("path") or path
+            node_id = node.get("id")
             if isinstance(node_id, str) and node_id.strip():
                 ids.add(node_id)
-            for key in ("children", "nodes", "items"):
-                children = node.get(key, [])
-                if not isinstance(children, list):
-                    continue
-                for index, child in enumerate(children):
-                    child_path = (
-                        f"{node_id}/{index}" if isinstance(node_id, str) else f"{path}/{index}"
-                    )
-                    visit(child, child_path)
+            children = node.get("children", [])
+            if isinstance(children, list):
+                for child in children:
+                    visit(child)
         elif isinstance(node, list):
-            for index, child in enumerate(node):
-                visit(child, f"{path}/{index}" if path else str(index))
-        elif isinstance(node, str) and node.strip():
-            ids.add(node)
+            for child in node:
+                visit(child)
 
     visit(outline)
     return ids
@@ -2558,21 +2969,18 @@ def _outline_nodes_with_labels(outline: Any) -> list[tuple[str, str, str | None]
 
     def visit(node: Any, parent_id: str | None = None, fallback: str = "") -> None:
         if isinstance(node, dict):
-            node_id = node.get("id") or node.get("path") or fallback
+            node_id = node.get("id")
             title = node.get("title") or node_id
             current_id = str(node_id)
             if current_id:
                 nodes.append((current_id, str(title), parent_id))
-            for key in ("children", "nodes", "items"):
-                children = node.get(key)
-                if isinstance(children, list):
-                    for index, child in enumerate(children):
-                        visit(child, current_id, f"{current_id}/{index}")
+            children = node.get("children")
+            if isinstance(children, list):
+                for index, child in enumerate(children):
+                    visit(child, current_id, f"{current_id}/{index}")
         elif isinstance(node, list):
             for index, child in enumerate(node):
                 visit(child, parent_id, str(index))
-        elif isinstance(node, str) and node.strip():
-            nodes.append((node, node, parent_id))
 
     visit(outline)
     return nodes
@@ -2584,17 +2992,21 @@ def _active_knowledgebase_context(repository: ObjectRepository) -> list[dict[str
         for record in _all_records(repository)
         if record.object_type == "knowledge-base" and record.status == "active"
     ]
-    return [
-        {
-            "id": record.object_id,
-            "title": record.metadata.get("title"),
-            "description": record.metadata.get("description"),
-            "tags": record.metadata.get("tags", []),
-            "scope": record.metadata.get("scope", {}),
-            "outline": record.metadata.get("outline", []),
-        }
-        for record in records
-    ]
+    context: list[dict[str, Any]] = []
+    for record in records:
+        outlines_document = _read_outlines_file(repository.workspace, record)
+        context.append(
+            {
+                "id": record.object_id,
+                "title": record.metadata.get("title"),
+                "description": record.metadata.get("description"),
+                "tags": record.metadata.get("tags", []),
+                "scope": record.metadata.get("scope", {}),
+                "default_outline_id": record.metadata.get("default_outline_id"),
+                "outlines": outlines_document.get("outlines", []),
+            }
+        )
+    return context
 
 
 def _validate_outline_change_suggestions(
@@ -2610,6 +3022,10 @@ def _validate_outline_change_suggestions(
             raise RepositoryError(
                 f"outline_change_suggestions[].kb_id must reference active knowledge-base: {kb_id}"
             )
+        outline_id = item.get("outline_id")
+        if outline_id is not None:
+            outlines_document = _read_outlines_file(repository.workspace, record)
+            _outline_by_id(outlines_document, str(outline_id))
         for field in ("reason", "suggested_change"):
             if not isinstance(item.get(field), str) or not item[field].strip():
                 raise RepositoryError(f"outline_change_suggestions[].{field} is required")
@@ -2894,7 +3310,9 @@ def _clean_object_schemas() -> dict[str, dict[str, set[str]]]:
                 "description",
                 "tags",
                 "scope",
-                "outline",
+                "default_outline_id",
+                "outlines_file",
+                "outlines",
             },
             "allowed": object_fields
             | review_fields
@@ -2902,7 +3320,9 @@ def _clean_object_schemas() -> dict[str, dict[str, set[str]]]:
                 "description",
                 "tags",
                 "scope",
-                "outline",
+                "default_outline_id",
+                "outlines_file",
+                "outlines",
             },
         },
         "note": {
@@ -3869,21 +4289,28 @@ def _validate_bindto(
         if not isinstance(item, dict):
             raise RepositoryError(BINDTO_SHAPE)
         kb_id = item.get("kb_id")
-        outline_node = item.get("outline_node")
+        outline_id = item.get("outline_id")
+        node_id = item.get("node_id")
         reason = item.get("reason")
+        if "outline_node" in item:
+            raise RepositoryError(f"{BINDTO_SHAPE}; outline_node is deprecated, use node_id")
         if not isinstance(kb_id, str) or not kb_id.strip():
             raise RepositoryError(f"{BINDTO_SHAPE}; kb_id is required")
-        if not isinstance(outline_node, str) or not outline_node.strip():
-            raise RepositoryError(f"{BINDTO_SHAPE}; outline_node is required")
+        if not isinstance(outline_id, str) or not outline_id.strip():
+            raise RepositoryError(f"{BINDTO_SHAPE}; outline_id is required")
+        if not isinstance(node_id, str) or not node_id.strip():
+            raise RepositoryError(f"{BINDTO_SHAPE}; node_id is required")
         if not isinstance(reason, str) or not reason.strip():
             raise RepositoryError(f"{BINDTO_SHAPE}; reason is required")
         record = _find_single_object(repository, kb_id)
         if record.object_type != "knowledge-base" or record.status != "active":
             raise RepositoryError(f"bindto.kb_id must reference an active knowledge-base: {kb_id}")
-        if outline_node not in _outline_node_ids(record.metadata.get("outline", [])):
-            raise RepositoryError(
-                f"bindto.outline_node does not exist in {kb_id}: {outline_node}"
-            )
+        outlines_document = _read_outlines_file(repository.workspace, record)
+        outline = _outline_by_id(outlines_document, outline_id)
+        if outline.get("status") != "active":
+            raise RepositoryError(f"bindto.outline_id must reference an active outline: {outline_id}")
+        if node_id not in _outline_node_ids(outline.get("nodes", [])):
+            raise RepositoryError(f"bindto.node_id does not exist in {kb_id}/{outline_id}: {node_id}")
 
 
 def _candidate_reference_summaries(

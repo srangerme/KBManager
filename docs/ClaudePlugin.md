@@ -32,6 +32,9 @@ commands are invoked as:
 /kbm:knowledgebase-create <path-or-url>
 /kbm:knowledgebase-list [knowledgebase-id]
 /kbm:knowledgebase-map [knowledgebase-id]
+/kbm:knowledgebase-outline-archive [knowledgebase-id] [outline-id]
+/kbm:knowledgebase-outline-create [knowledgebase-id] <path-or-url>
+/kbm:knowledgebase-outline-set-default [knowledgebase-id] [outline-id]
 /kbm:lark-server-start
 /kbm:lark-server-status
 /kbm:lark-server-stop

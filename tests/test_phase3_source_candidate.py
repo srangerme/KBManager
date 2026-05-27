@@ -2,14 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from kbmanager import application
 from kbmanager.application import (
     candidate_create,
     candidate_get,
     candidate_next_pending,
     init_workspace,
     knowledgebase_create,
-    knowledgebase_init,
     source_add,
     source_deprecate,
 )
@@ -42,27 +40,29 @@ def _create_source(tmp_path: Path) -> str:
 
 
 def _create_active_kb(tmp_path: Path) -> str:
-    created = knowledgebase_create(tmp_path, title="Research KB").to_dict()
-    kb_id = created["knowledgebase_id"]
-    (tmp_path / "kb.md").write_text("# KB\n", encoding="utf-8")
-    first = knowledgebase_init(tmp_path, knowledgebase_id=kb_id, input_path="kb.md").to_dict()
     payload = {
         "description": "Research knowledge.",
         "tags": ["research"],
         "scope": {"includes": ["research"], "excludes": ["misc"]},
-        "outline": [{"id": "sec1", "title": "Section 1"}],
+        "default_outline_id": "canonical",
+        "outlines": [
+            {
+                "id": "canonical",
+                "title": "Main",
+                "description": "Main outline.",
+                "status": "active",
+                "nodes": [{"id": "sec1", "title": "Section 1"}],
+            }
+        ],
     }
-    result = knowledgebase_init(
+    result = knowledgebase_create(
         tmp_path,
-        knowledgebase_id=kb_id,
-        input_path="kb.md",
-        resume_token=first["resume"]["token"],
-        llm_result=payload,
+        title="Research KB",
         review={"decision": "approve"},
-        reviewed_payload=payload,
+        **payload,
     ).to_dict()
     assert result["status"] == "success"
-    return kb_id
+    return result["knowledgebase_id"]
 
 
 def _candidate_llm_result(source_id: str, kb_id: str) -> dict[str, object]:
@@ -76,7 +76,14 @@ def _candidate_llm_result(source_id: str, kb_id: str) -> dict[str, object]:
                 "evidence": [
                     {"source_id": source_id, "locator": "section 1", "quote": "Useful content."}
                 ],
-                "bindto": [{"kb_id": kb_id, "outline_node": "sec1", "reason": "Fits."}],
+                "bindto": [
+                    {
+                        "kb_id": kb_id,
+                        "outline_id": "canonical",
+                        "node_id": "sec1",
+                        "reason": "Fits.",
+                    }
+                ],
                 "outline_change_suggestions": [],
             }
         ]
@@ -122,7 +129,7 @@ def test_candidate_create_writes_pending_candidate_with_bindto(tmp_path: Path) -
     )
     assert document.frontmatter["summary"] == "Candidate summary."
     assert document.frontmatter["bindto"] == [
-        {"kb_id": kb_id, "outline_node": "sec1", "reason": "Fits."}
+        {"kb_id": kb_id, "outline_id": "canonical", "node_id": "sec1", "reason": "Fits."}
     ]
     assert "relations" not in document.frontmatter
     assert "suggested_kb_ids" not in document.frontmatter
@@ -133,7 +140,7 @@ def test_candidate_create_rejects_invalid_bindto_outline_node(tmp_path: Path) ->
     kb_id = _create_active_kb(tmp_path)
     first = candidate_create(tmp_path, source_ids=[source_id]).to_dict()
     llm_result = _candidate_llm_result(source_id, kb_id)
-    llm_result["candidates"][0]["bindto"][0]["outline_node"] = "missing"
+    llm_result["candidates"][0]["bindto"][0]["node_id"] = "missing"
 
     result = candidate_create(
         tmp_path,
@@ -143,7 +150,7 @@ def test_candidate_create_rejects_invalid_bindto_outline_node(tmp_path: Path) ->
     ).to_dict()
 
     assert result["status"] == "failed"
-    assert "outline_node does not exist" in result["errors"][0]["message"]
+    assert "node_id does not exist" in result["errors"][0]["message"]
 
 
 def test_candidate_create_rejects_archived_source_status(tmp_path: Path) -> None:
@@ -203,31 +210,3 @@ def test_source_deprecate_reports_evidence_impacts(tmp_path: Path) -> None:
 
     assert result["status"] == "success"
     assert result["impacts"][0]["fields"] == "evidence"
-
-
-def test_knowledgebase_init_url_pdf_fallback_stays_outside_workspace(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    init_workspace(tmp_path)
-    kb_id = knowledgebase_create(tmp_path, title="URL KB").to_dict()["knowledgebase_id"]
-
-    def fail_html(url: str) -> str:
-        raise application.RepositoryError("direct failed")
-
-    def write_temp_pdf(url: str) -> Path:
-        target = tmp_path.parent / "temporary-capture.pdf"
-        target.write_bytes(b"%PDF temp")
-        return target
-
-    monkeypatch.setattr(application, "_download_url_as_html", fail_html)
-    monkeypatch.setattr(application, "_download_url_as_temporary_pdf", write_temp_pdf)
-
-    result = knowledgebase_init(
-        tmp_path,
-        knowledgebase_id=kb_id,
-        input_path="https://example.test/page",
-    ).to_dict()
-
-    assert result["status"] == "needs_llm"
-    assert not list((tmp_path / "data/attachments/url-captures").glob("*.pdf"))

@@ -6,7 +6,6 @@ from kbmanager.application import (
     clean_inspect,
     init_workspace,
     knowledgebase_create,
-    knowledgebase_init,
     note_add,
     note_deprecate,
     note_get,
@@ -15,68 +14,69 @@ from kbmanager.repository import MarkdownDocument, ObjectRepository
 from kbmanager.workspace import Workspace
 
 
-def test_knowledgebase_create_writes_initializing_shell(tmp_path: Path) -> None:
-    init_workspace(tmp_path)
-
-    result = knowledgebase_create(tmp_path, title="Research KB").to_dict()
-
-    assert result["status"] == "success"
-    document = ObjectRepository(Workspace(tmp_path)).read_markdown(result["path"])
-    assert document.frontmatter["status"] == "initializing"
-    assert document.frontmatter["description"] == ""
-    assert document.frontmatter["scope"] == {"includes": [], "excludes": []}
-    assert document.frontmatter["outline"] == []
-    assert "acceptance_criteria" not in document.frontmatter
-    assert "knowledge_ids" not in document.frontmatter
-
-
-def test_knowledgebase_init_requires_llm_then_review(tmp_path: Path) -> None:
-    init_workspace(tmp_path)
-    (tmp_path / "input.md").write_text("# Input\n", encoding="utf-8")
-    kb_id = knowledgebase_create(tmp_path, title="Research KB").to_dict()["knowledgebase_id"]
-
-    first = knowledgebase_init(tmp_path, knowledgebase_id=kb_id, input_path="input.md").to_dict()
-    draft = {
+def _kb_payload() -> dict[str, object]:
+    return {
         "description": "Research knowledge.",
         "tags": ["research"],
         "scope": {"includes": ["research"], "excludes": ["misc"]},
-        "outline": [{"id": "sec1", "title": "Section 1"}],
+        "default_outline_id": "canonical",
+        "outlines": [
+            {
+                "id": "canonical",
+                "title": "Main",
+                "description": "Main outline.",
+                "status": "active",
+                "nodes": [{"id": "sec1", "title": "Section 1"}],
+            }
+        ],
     }
-    review = knowledgebase_init(
+
+
+def test_knowledgebase_create_requires_review_then_writes_active_kb_and_outlines(
+    tmp_path: Path,
+) -> None:
+    init_workspace(tmp_path)
+
+    gate = knowledgebase_create(tmp_path, title="Research KB", **_kb_payload()).to_dict()
+    final = knowledgebase_create(
         tmp_path,
-        knowledgebase_id=kb_id,
-        input_path="input.md",
-        resume_token=first["resume"]["token"],
-        llm_result=draft,
-    ).to_dict()
-    final = knowledgebase_init(
-        tmp_path,
-        knowledgebase_id=kb_id,
-        input_path="input.md",
-        resume_token=first["resume"]["token"],
-        llm_result=draft,
+        title="Research KB",
         review={"decision": "approve"},
-        reviewed_payload=draft,
+        **_kb_payload(),
     ).to_dict()
 
-    assert first["status"] == "needs_llm"
-    assert review["status"] == "needs_review"
+    assert gate["status"] == "needs_review"
     assert final["status"] == "success"
     document = ObjectRepository(Workspace(tmp_path)).read_markdown(final["path"])
     assert document.frontmatter["status"] == "active"
-    assert document.frontmatter["outline"][0]["id"] == "sec1"
+    assert "outline" not in document.frontmatter
+    outlines_file = tmp_path / final["outlines_file"]
+    assert outlines_file.is_file()
+    assert "sec1" in outlines_file.read_text(encoding="utf-8")
 
 
 def test_knowledgebase_create_rejects_duplicate_id_and_title(tmp_path: Path) -> None:
     init_workspace(tmp_path)
-    first = knowledgebase_create(tmp_path, title="Research KB").to_dict()
+    first = knowledgebase_create(
+        tmp_path,
+        title="Research KB",
+        review={"decision": "approve"},
+        **_kb_payload(),
+    ).to_dict()
 
     duplicate_id = knowledgebase_create(
         tmp_path,
         title="Other KB",
         knowledgebase_id=first["knowledgebase_id"],
+        review={"decision": "approve"},
+        **_kb_payload(),
     ).to_dict()
-    duplicate_title = knowledgebase_create(tmp_path, title="Research KB").to_dict()
+    duplicate_title = knowledgebase_create(
+        tmp_path,
+        title="Research KB",
+        review={"decision": "approve"},
+        **_kb_payload(),
+    ).to_dict()
 
     assert duplicate_id["status"] == "failed"
     assert duplicate_title["status"] == "failed"

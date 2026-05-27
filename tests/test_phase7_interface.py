@@ -63,7 +63,9 @@ def _candidate(candidate_id: str = "knowledge-20260520-001") -> dict[str, Any]:
             "title": "Candidate",
             "summary": "Candidate summary.",
             "evidence": [{"source_id": "source-1", "locator": "l", "quote": "q"}],
-            "bindto": [{"kb_id": "kb-1", "outline_node": "sec1", "reason": "Fits."}],
+            "bindto": [
+                {"kb_id": "kb-1", "outline_id": "canonical", "node_id": "sec1", "reason": "Fits."}
+            ],
             "outline_change_suggestions": [],
         },
         "body": "Candidate body.",
@@ -80,7 +82,9 @@ def _merge_assist() -> dict[str, Any]:
         "merged_summary": "Merged summary.",
         "merged_content": "Merged content.",
         "evidence": [{"source_id": "source-1", "locator": "l", "quote": "q"}],
-        "bindto": [{"kb_id": "kb-1", "outline_node": "sec1", "reason": "Fits."}],
+        "bindto": [
+            {"kb_id": "kb-1", "outline_id": "canonical", "node_id": "sec1", "reason": "Fits."}
+        ],
         "evidence_review": [],
     }
 
@@ -143,14 +147,16 @@ def test_candidate_accept_passes_new_review_payload() -> None:
             "summary": "Summary.",
             "content": "Content.",
             "evidence": [{"source_id": "source-1", "locator": "l", "quote": "q"}],
-            "bindto": [{"kb_id": "kb-1", "outline_node": "sec1", "reason": "Fits."}],
+            "bindto": [
+                {"kb_id": "kb-1", "outline_id": "canonical", "node_id": "sec1", "reason": "Fits."}
+            ],
         },
     )
 
     assert result.to_dict()["status"] == "success"
     kwargs = api.calls[-1][1]
     assert "kb_ids" not in kwargs
-    assert kwargs["bindto"][0]["outline_node"] == "sec1"
+    assert kwargs["bindto"][0]["node_id"] == "sec1"
 
 
 def test_candidate_merge_uses_merge_assist_and_reviewed_payload() -> None:
@@ -175,15 +181,11 @@ def test_candidate_merge_uses_merge_assist_and_reviewed_payload() -> None:
     assert api.calls[-1][0] == "kb.knowledge.merge"
 
 
-def test_knowledgebase_create_orchestrates_create_init_review() -> None:
+def test_knowledgebase_create_orchestrates_single_create_review() -> None:
     api = MockApi(
         {
             "kb.knowledgebase.create": [
-                _success("kb.knowledgebase.create", knowledgebase_id="kb-1")
-            ],
-            "kb.knowledgebase.init": [
-                _needs_llm("kb.knowledgebase.init", "init-token"),
-                _api_result("needs_review", "kb.knowledgebase.init", draft={"description": "d"}),
+                _api_result("needs_review", "kb.knowledgebase.create")
             ],
         }
     )
@@ -193,7 +195,16 @@ def test_knowledgebase_create_orchestrates_create_init_review() -> None:
                 "description": "d",
                 "tags": [],
                 "scope": {"includes": ["i"], "excludes": []},
-                "outline": [],
+                "default_outline_id": "canonical",
+                "outlines": [
+                    {
+                        "id": "canonical",
+                        "title": "Main",
+                        "description": "Main outline.",
+                        "status": "active",
+                        "nodes": [],
+                    }
+                ],
             }
         }
     )
@@ -204,11 +215,7 @@ def test_knowledgebase_create_orchestrates_create_init_review() -> None:
     )
 
     assert result.to_dict()["status"] == "needs_review"
-    assert [call[0] for call in api.calls] == [
-        "kb.knowledgebase.create",
-        "kb.knowledgebase.init",
-        "kb.knowledgebase.init",
-    ]
+    assert [call[0] for call in api.calls] == ["kb.knowledgebase.create"]
 
 
 def test_read_only_list_commands_display_markdown(tmp_path: Path) -> None:

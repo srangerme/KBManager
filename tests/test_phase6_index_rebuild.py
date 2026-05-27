@@ -5,6 +5,7 @@ from pathlib import Path
 from kbmanager.application import index_rebuild, init_workspace, knowledgebase_map
 from kbmanager.repository import MarkdownDocument, ObjectRepository
 from kbmanager.workspace import Workspace
+import yaml
 
 
 def _repo(tmp_path: Path) -> ObjectRepository:
@@ -54,10 +55,39 @@ def _seed_new_model(tmp_path: Path, *, bad_outline: bool = False) -> None:
             "description": "Research knowledge.",
             "tags": ["kb-tag"],
             "scope": {"includes": ["research"], "excludes": []},
-            "outline": [{"id": "sec1", "title": "Section 1"}],
+            "default_outline_id": "canonical",
+            "outlines_file": "knowledge/bases/kb-20260520-001-outlines.yml",
+            "outlines": [
+                {
+                    "id": "canonical",
+                    "title": "Main",
+                    "description": "Main outline.",
+                    "status": "active",
+                }
+            ],
             "created": "2026-05-20",
             "updated": "2026-05-20",
         },
+    )
+    (tmp_path / "knowledge/bases/kb-20260520-001-outlines.yml").write_text(
+        yaml.safe_dump(
+            {
+                "kb_id": "kb-20260520-001",
+                "default_outline_id": "canonical",
+                "outlines": [
+                    {
+                        "id": "canonical",
+                        "title": "Main",
+                        "description": "Main outline.",
+                        "status": "active",
+                        "nodes": [{"id": "sec1", "title": "Section 1"}],
+                    }
+                ],
+            },
+            sort_keys=False,
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
     )
     _write_markdown(
         tmp_path,
@@ -74,7 +104,8 @@ def _seed_new_model(tmp_path: Path, *, bad_outline: bool = False) -> None:
             "bindto": [
                 {
                     "kb_id": "kb-20260520-001",
-                    "outline_node": "missing" if bad_outline else "sec1",
+                    "outline_id": "canonical",
+                    "node_id": "missing" if bad_outline else "sec1",
                     "reason": "Fits.",
                 }
             ],
@@ -114,14 +145,14 @@ def test_index_rebuild_derives_knowledgebase_members_from_bindto(tmp_path: Path)
     assert result["issues"] == []
 
 
-def test_index_rebuild_reports_invalid_bindto_outline_node(tmp_path: Path) -> None:
+def test_index_rebuild_reports_invalid_bindto_node_id(tmp_path: Path) -> None:
     init_workspace(tmp_path)
     _seed_new_model(tmp_path, bad_outline=True)
 
     result = index_rebuild(tmp_path, dry_run=True).to_dict()
 
     assert result["status"] == "success"
-    assert result["issues"][0]["code"] == "invalid_bindto_outline_node"
+    assert result["issues"][0]["code"] == "invalid_bindto_node_id"
 
 
 def test_index_rebuild_dry_run_does_not_write(tmp_path: Path) -> None:

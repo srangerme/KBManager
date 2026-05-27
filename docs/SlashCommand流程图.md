@@ -124,6 +124,34 @@ flowchart TD
   D -- 否 --> F["(interface) 展示临时文件路径和 Markdown 内容"]
 ```
 
+## 8. `/knowledgebase outline archive [knowledgebase-id] [outline-id]`
+
+```mermaid
+flowchart TD
+  A["(user) 输入命令"] --> B["(interface) 缺少 ID 时列出并要求选择"]
+  B --> C["(api) kb.knowledgebase.outline.archive"]
+  C --> D["(interface) 展示归档结果和索引重建结果"]
+```
+
+## 9. `/knowledgebase outline create [knowledgebase-id] <path-or-url>`
+
+```mermaid
+flowchart TD
+  A["(user) 输入命令"] --> B["(interface) 缺少 KB ID 或输入时要求提供"]
+  B --> C["(LLM) 基于临时输入生成 outline 草案"]
+  C --> D["(user) review/approve"]
+  D --> E["(api) kb.knowledgebase.outline.create"]
+```
+
+## 10. `/knowledgebase outline set-default [knowledgebase-id] [outline-id]`
+
+```mermaid
+flowchart TD
+  A["(user) 输入命令"] --> B["(interface) 缺少 ID 时列出并要求选择"]
+  B --> C["(user) 确认默认 outline 切换"]
+  C --> D["(api) kb.knowledgebase.outline.set_default"]
+```
+
 ## 8. `/lark server start`
 
 ```mermaid

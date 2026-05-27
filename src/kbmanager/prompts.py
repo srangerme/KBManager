@@ -65,8 +65,8 @@ OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
                     "content": "non-empty string",
                     "source_refs": "list[string]",
                     "evidence": "list[{source_id|object_id|id, locator, quote|excerpt|snippet}]",
-                    "bindto": "list[{kb_id, outline_node, reason}] or []",
-                    "outline_change_suggestions": "list[{kb_id, reason, suggested_change}] or []",
+                    "bindto": "list[{kb_id, outline_id, node_id, reason}] or []",
+                    "outline_change_suggestions": "list[{kb_id, outline_id|null, reason, suggested_change}] or []",
                 }
             ]
         },
@@ -94,7 +94,7 @@ OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
         "properties": {
             "summary": "non-empty string",
             "evidence_review": "list[object]",
-            "bindto": "list[{kb_id, outline_node, reason}]",
+            "bindto": "list[{kb_id, outline_id, node_id, reason}]",
             "recommendations": "list[object|string]",
         },
     },
@@ -110,7 +110,8 @@ OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
                 "description": "non-empty string",
                 "tags": "list[string]",
                 "scope": "{includes: list[string], excludes: list[string]}",
-                "outline": "list[outline_node]",
+                "default_outline_id": "non-empty string",
+                "outlines": "list[{id, title, description, status, nodes}]",
             },
         },
     },

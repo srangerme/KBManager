@@ -11,7 +11,6 @@ from kbmanager.application import (
     knowledge_merge,
     knowledge_reject,
     knowledgebase_create,
-    knowledgebase_init,
     source_add,
 )
 from kbmanager.repository import ObjectRepository
@@ -37,31 +36,36 @@ def _setup_candidate(
     ).to_dict()
     source_id = source["source"]["id"]
 
-    (tmp_path / "kb.md").write_text("# KB\n", encoding="utf-8")
     kb_title = f"Research KB {candidate_id}"
-    kb_id = knowledgebase_create(tmp_path, title=kb_title).to_dict()["knowledgebase_id"]
-    kb_init = knowledgebase_init(tmp_path, knowledgebase_id=kb_id, input_path="kb.md").to_dict()
     kb_payload = {
         "description": "Research.",
         "tags": [],
         "scope": {"includes": ["research"], "excludes": []},
-        "outline": [{"id": "sec1", "title": "Section 1"}],
+        "default_outline_id": "canonical",
+        "outlines": [
+            {
+                "id": "canonical",
+                "title": "Main",
+                "description": "Main outline.",
+                "status": "active",
+                "nodes": [{"id": "sec1", "title": "Section 1"}],
+            }
+        ],
     }
-    knowledgebase_init(
+    kb_id = knowledgebase_create(
         tmp_path,
-        knowledgebase_id=kb_id,
-        input_path="kb.md",
-        resume_token=kb_init["resume"]["token"],
-        llm_result=kb_payload,
         review={"decision": "approve"},
-        reviewed_payload=kb_payload,
-    )
+        title=kb_title,
+        **kb_payload,
+    ).to_dict()["knowledgebase_id"]
     candidate_payload = {
         "title": "Candidate",
         "summary": "Candidate summary.",
         "content": "Candidate content.",
         "evidence": [{"source_id": source_id, "locator": "section 1", "quote": "quote"}],
-        "bindto": [{"kb_id": kb_id, "outline_node": "sec1", "reason": "Fits."}],
+        "bindto": [
+            {"kb_id": kb_id, "outline_id": "canonical", "node_id": "sec1", "reason": "Fits."}
+        ],
         "outline_change_suggestions": [],
     }
     first_candidate = candidate_create(tmp_path, source_ids=[source_id]).to_dict()

@@ -518,45 +518,26 @@ class SlashCommandInterface:
         approve: bool = False,
     ) -> InterfaceResult:
         calls: list[ApiCallRecord] = []
-        created = self._call(
+        init_llm_result = init_llm_result or self._complete_llm(
+            "knowledgebase_create",
+            None,
+            {"title": title, "input_path": str(input_path)},
+        )
+        reviewed = _knowledgebase_review_payload(reviewed_markdown, init_llm_result)
+        review = {"decision": "approve", "reviewed_by": self.reviewed_by} if approve else None
+        create_result = self._call(
             calls,
             "kb.knowledgebase.create",
             title=title,
             knowledgebase_id=knowledgebase_id,
-        )
-        if created["status"] != ApiStatus.SUCCESS.value:
-            return self._from_api_result(created, calls, "Knowledgebase create failed.")
-        kb_id = created["knowledgebase_id"]
-        init_result = self._call(
-            calls,
-            "kb.knowledgebase.init",
-            knowledgebase_id=kb_id,
-            input_path=input_path,
-        )
-        if init_result["status"] != ApiStatus.NEEDS_LLM.value:
-            return self._from_api_result(
-                init_result,
-                calls,
-                "Knowledgebase init did not reach LLM boundary.",
-            )
-        init_llm_result = init_llm_result or self._complete_llm(
-            "knowledgebase_create",
-            init_result.get("llm_request"),
-            {"knowledgebase_id": kb_id, "input_path": str(input_path)},
-        )
-        reviewed = _knowledgebase_review_payload(reviewed_markdown, init_llm_result)
-        review = {"decision": "approve", "reviewed_by": self.reviewed_by} if approve else None
-        init_result = self._call(
-            calls,
-            "kb.knowledgebase.init",
-            knowledgebase_id=kb_id,
-            input_path=input_path,
-            resume_token=init_result["resume"]["token"],
-            llm_result=init_llm_result,
+            description=reviewed.get("description"),
+            tags=reviewed.get("tags", []),
+            scope=reviewed.get("scope"),
+            default_outline_id=reviewed.get("default_outline_id"),
+            outlines=reviewed.get("outlines"),
             review=review,
-            reviewed_payload=reviewed if approve else None,
         )
-        if init_result["status"] == ApiStatus.NEEDS_REVIEW.value:
+        if create_result["status"] == ApiStatus.NEEDS_REVIEW.value:
             return InterfaceResult(
                 status=ApiStatus.NEEDS_REVIEW.value,
                 summary="Knowledgebase draft is waiting for user input in Claude Code.",
@@ -570,13 +551,13 @@ class SlashCommandInterface:
                         )
                 ],
                 next_actions=["Approve or revise the knowledgebase draft in Claude Code."],
-                extra={"created": created, "draft": init_result.get("draft")},
+                extra={"draft": reviewed},
             )
         return self._from_api_result(
-            init_result,
+            create_result,
             calls,
-            "Created and initialized knowledgebase.",
-            extra={"created": created, "initialized": init_result},
+            "Created knowledgebase.",
+            extra={"draft": reviewed},
         )
 
     def kb_knowledgebase_list(self, knowledgebase_id: str | None = None) -> InterfaceResult:
@@ -904,8 +885,12 @@ def _validate_llm_output(schema_name: str, result: Any) -> str | None:
             return "knowledgebase_create_draft.frontmatter.tags must be a list of strings"
         if not isinstance(frontmatter.get("scope"), dict):
             return "knowledgebase_create_draft.frontmatter.scope must be a mapping"
-        if not isinstance(frontmatter.get("outline"), list):
-            return "knowledgebase_create_draft.frontmatter.outline must be a list"
+        if not isinstance(frontmatter.get("default_outline_id"), str) or not frontmatter[
+            "default_outline_id"
+        ].strip():
+            return "knowledgebase_create_draft.frontmatter.default_outline_id must be a non-empty string"
+        if not isinstance(frontmatter.get("outlines"), list):
+            return "knowledgebase_create_draft.frontmatter.outlines must be a list"
         if not isinstance(result.get("body"), str) or not result["body"].strip():
             return "knowledgebase_create_draft.body must be a non-empty string"
     return None
@@ -1052,7 +1037,9 @@ _APPLICATION_OPERATIONS = {
     "kb.knowledge.merge": application.knowledge_merge,
     "kb.knowledge.deprecate": application.knowledge_deprecate,
     "kb.knowledgebase.create": application.knowledgebase_create,
-    "kb.knowledgebase.init": application.knowledgebase_init,
+    "kb.knowledgebase.outline.create": application.knowledgebase_outline_create,
+    "kb.knowledgebase.outline.set_default": application.knowledgebase_outline_set_default,
+    "kb.knowledgebase.outline.archive": application.knowledgebase_outline_archive,
     "kb.knowledgebase.map": application.knowledgebase_map,
     "kb.note.add": application.note_add,
     "kb.note.get": application.note_get,

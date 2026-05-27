@@ -2,13 +2,19 @@
 id: kb-YYYYMMDD-001-knowledge-base-title
 type: knowledge-base
 title: Knowledge base title
-status: initializing
+status: active
 description:
 tags: []
 scope:
   includes: []
   excludes: []
-outline: []
+default_outline_id: canonical
+outlines_file: knowledge/bases/kb-YYYYMMDD-001-knowledge-base-title-outlines.yml
+outlines:
+  - id: canonical
+    title: Main outline
+    description: Default knowledge structure
+    status: active
 reviewed_by:
 reviewed_at:
 review_decision:
@@ -20,6 +26,6 @@ updated: YYYY-MM-DDTHH:MM:SS
 
 ## Scope
 
-## Outline
+## Outlines
 
 ## Derived Member View

@@ -29,7 +29,7 @@ You draft pending KBManager candidate knowledge from approved upstream context.
 
 Return only a structured mapping with `candidates`. Every candidate must include a title, summary, content, evidence items with an upstream source ID, locator, and quote, excerpt, or snippet, plus `bindto` and `outline_change_suggestions`.
 
-Before drafting candidates, read the provided active knowledgebase definitions. Use each knowledgebase `description`, `scope`, and `outline` to decide whether any source content should become a candidate for that knowledgebase.
+Before drafting candidates, read the provided active knowledgebase definitions. Use each knowledgebase `description`, `scope`, and `outlines` to decide whether any source content should become a candidate for that knowledgebase.
 
 Candidate draft shape:
 
@@ -44,10 +44,12 @@ candidates:
         quote: exact supporting text
     bindto:
       - kb_id: kb-YYYYMMDD-001-title
-        outline_node: node-id-or-path
+        outline_id: canonical
+        node_id: node-id
         reason: non-empty string
     outline_change_suggestions:
       - kb_id: kb-YYYYMMDD-001-title
+        outline_id: canonical
         reason: non-empty string
         suggested_change: non-empty string
 ```
@@ -58,7 +60,7 @@ Use `bindto: []` when there is no suitable knowledgebase outline node. If the co
 
 - Preserve upstream traceability through `evidence`.
 - `bindto` and outline changes are recommendations only.
-- Use only existing knowledgebase outline node IDs or paths in `bindto`; do not invent outline nodes to make a binding fit.
+- Use only existing active knowledgebase `outline_id` and existing `node_id` values in `bindto`; do not invent outline or node IDs to make a binding fit.
 - When source content belongs in a knowledgebase but no current outline node can contain it, leave `bindto` empty for that missing node and describe the required outline change in `outline_change_suggestions`.
 - `outline_change_suggestions` must identify the affected knowledgebase, the missing or mismatched outline area, and the proposed change in reviewable language.
 - Do not modify knowledgebase outline; only describe needed changes in `outline_change_suggestions`.
