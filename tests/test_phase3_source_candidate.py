@@ -238,7 +238,6 @@ def test_source_deprecate_reports_evidence_impacts(tmp_path: Path) -> None:
         dry_run=False,
         source_id=source_id,
         decision="deprecate",
-        reviewed_by="user",
         reason="Superseded.",
     ).to_dict()
 

@@ -444,7 +444,6 @@ def source_deprecate(
     entrypoint: str | None = None,
     source_id: str,
     decision: str | None = None,
-    reviewed_by: str | None = None,
     reason: str | None = None,
     dry_run: bool | None = None,
 ) -> ApiResult:
@@ -458,7 +457,7 @@ def source_deprecate(
     if contract_error is not None:
         return contract_error
 
-    if not _has_review_decision(decision, reviewed_by, "deprecate"):
+    if not _has_review_decision(decision, "deprecate"):
         return _needs_review(SOURCE_DEPRECATE_OPERATION, ["deprecate", "revise"])
 
     try:
@@ -474,7 +473,6 @@ def source_deprecate(
                 "status": "deprecated",
                 "deprecated_at": today,
                 "deprecated_reason": reason.strip(),
-                "reviewed_by": reviewed_by,
                 "reviewed_at": today,
                 "review_decision": "deprecate",
                 "updated": today,
@@ -733,7 +731,6 @@ def knowledge_accept(
     entrypoint: str | None = None,
     candidate_id: str,
     decision: str | None = None,
-    reviewed_by: str | None = None,
     reason: str | None = None,
     title: str | None = None,
     summary: str | None = None,
@@ -752,7 +749,7 @@ def knowledge_accept(
     if contract_error is not None:
         return contract_error
 
-    if not _has_review_decision(decision, reviewed_by, "accept"):
+    if not _has_review_decision(decision, "accept"):
         return _needs_review(KNOWLEDGE_ACCEPT_OPERATION, ["accept", "reject", "defer", "merge"])
 
     try:
@@ -779,7 +776,6 @@ def knowledge_accept(
             "summary": summary,
             "evidence": reviewed_evidence,
             "bindto": bindto or [],
-            "reviewed_by": reviewed_by,
             "reviewed_at": today,
             "review_decision": "accept",
             "review_reason": reason,
@@ -840,7 +836,6 @@ def knowledge_reject(
     entrypoint: str | None = None,
     candidate_id: str,
     decision: str | None = None,
-    reviewed_by: str | None = None,
     reason: str | None = None,
     dry_run: bool | None = None,
 ) -> ApiResult:
@@ -854,7 +849,7 @@ def knowledge_reject(
     if contract_error is not None:
         return contract_error
 
-    if not _has_review_decision(decision, reviewed_by, "reject"):
+    if not _has_review_decision(decision, "reject"):
         return _needs_review(KNOWLEDGE_REJECT_OPERATION, ["reject", "revise"])
     return _move_reviewed_candidate(
         root,
@@ -862,7 +857,6 @@ def knowledge_reject(
         candidate_id=candidate_id,
         target_status="rejected",
         decision="reject",
-        reviewed_by=reviewed_by,
         reason=reason,
         dry_run=bool(dry_run),
     )
@@ -874,7 +868,6 @@ def candidate_defer(
     entrypoint: str | None = None,
     candidate_id: str,
     decision: str | None = None,
-    reviewed_by: str | None = None,
     reason: str | None = None,
     dry_run: bool | None = None,
 ) -> ApiResult:
@@ -888,7 +881,7 @@ def candidate_defer(
     if contract_error is not None:
         return contract_error
 
-    if not _has_review_decision(decision, reviewed_by, "defer"):
+    if not _has_review_decision(decision, "defer"):
         return _needs_review(CANDIDATE_DEFER_OPERATION, ["defer", "accept", "reject"])
     return _move_reviewed_candidate(
         root,
@@ -896,7 +889,6 @@ def candidate_defer(
         candidate_id=candidate_id,
         target_status="deferred",
         decision="defer",
-        reviewed_by=reviewed_by,
         reason=reason,
         dry_run=bool(dry_run),
     )
@@ -909,7 +901,6 @@ def knowledge_merge(
     candidate_id: str,
     target_knowledge_id: str,
     decision: str | None = None,
-    reviewed_by: str | None = None,
     reason: str | None = None,
     title: str | None = None,
     summary: str | None = None,
@@ -928,7 +919,7 @@ def knowledge_merge(
     if contract_error is not None:
         return contract_error
 
-    if not _has_review_decision(decision, reviewed_by, "merge"):
+    if not _has_review_decision(decision, "merge"):
         return _needs_review(KNOWLEDGE_MERGE_OPERATION, ["merge", "reject", "revise"])
 
     try:
@@ -961,7 +952,6 @@ def knowledge_merge(
                 "summary": summary,
                 "evidence": evidence or [],
                 "bindto": bindto or [],
-                "reviewed_by": reviewed_by,
                 "reviewed_at": today,
                 "review_decision": "merge",
                 "review_reason": reason,
@@ -972,7 +962,6 @@ def knowledge_merge(
             candidate_document,
             status="rejected",
             decision="merge",
-            reviewed_by=reviewed_by,
             reason=reason,
         )
         knowledge_relative = str(workspace.relative(knowledge_record.path))
@@ -1042,7 +1031,6 @@ def knowledge_deprecate(
     entrypoint: str | None = None,
     knowledge_id: str,
     decision: str | None = None,
-    reviewed_by: str | None = None,
     reason: str | None = None,
     dry_run: bool | None = None,
 ) -> ApiResult:
@@ -1056,7 +1044,7 @@ def knowledge_deprecate(
     if contract_error is not None:
         return contract_error
 
-    if not _has_review_decision(decision, reviewed_by, "deprecate"):
+    if not _has_review_decision(decision, "deprecate"):
         return _needs_review(KNOWLEDGE_DEPRECATE_OPERATION, ["deprecate", "revise"])
 
     try:
@@ -1073,7 +1061,6 @@ def knowledge_deprecate(
                 "status": "deprecated",
                 "deprecated_at": today,
                 "deprecated_reason": reason,
-                "reviewed_by": reviewed_by,
                 "reviewed_at": today,
                 "review_decision": "deprecate",
                 "updated": today,
@@ -1121,7 +1108,6 @@ def knowledgebase_create(
     default_outline_id: str | None = None,
     outlines: list[dict[str, Any]] | None = None,
     review: dict[str, Any] | None = None,
-    reviewed_by: str | None = None,
     knowledgebase_id: str | None = None,
     dry_run: bool | None = None,
 ) -> ApiResult:
@@ -1182,7 +1168,6 @@ def knowledgebase_create(
             "default_outline_id": payload["default_outline_id"],
             "outlines_file": outlines_relative_path,
             "outlines": manifest,
-            "reviewed_by": reviewed_by,
             "reviewed_at": str((review or {}).get("reviewed_at") or today),
             "review_decision": "approve",
             "created": today,
@@ -1700,7 +1685,6 @@ def note_deprecate(
     note_id: str,
     reason: str | None = None,
     decision: str | None = None,
-    reviewed_by: str | None = None,
     dry_run: bool | None = None,
 ) -> ApiResult:
     """Mark a note deprecated and move it to notes/deprecated."""
@@ -1713,7 +1697,7 @@ def note_deprecate(
     if contract_error is not None:
         return contract_error
 
-    if not _has_review_decision(decision, reviewed_by, "deprecate"):
+    if not _has_review_decision(decision, "deprecate"):
         return _needs_review(NOTE_DEPRECATE_OPERATION, ["deprecate", "revise"])
 
     try:
@@ -1732,7 +1716,6 @@ def note_deprecate(
                 "status": "deprecated",
                 "deprecated_at": today,
                 "deprecated_reason": reason.strip(),
-                "reviewed_by": reviewed_by,
                 "reviewed_at": today,
                 "review_decision": "deprecate",
                 "updated": today,
@@ -2652,12 +2635,8 @@ def _needs_review(operation: str, options: list[str]) -> ApiResult:
     )
 
 
-def _has_review_decision(
-    decision: str | None,
-    reviewed_by: str | None,
-    expected: str,
-) -> bool:
-    return decision == expected and isinstance(reviewed_by, str) and bool(reviewed_by.strip())
+def _has_review_decision(decision: str | None, expected: str) -> bool:
+    return decision == expected
 
 
 def _pending_candidate_record(
@@ -2763,7 +2742,6 @@ def _reviewed_candidate_document(
     *,
     status: str,
     decision: str,
-    reviewed_by: str | None,
     reason: str | None,
 ) -> MarkdownDocument:
     frontmatter = dict(document.frontmatter)
@@ -2773,7 +2751,6 @@ def _reviewed_candidate_document(
             "type": "candidate",
             "status": status,
             "review": {
-                "reviewed_by": reviewed_by,
                 "reviewed_at": today,
                 "decision": decision,
                 "reason": reason,
@@ -2791,7 +2768,6 @@ def _move_reviewed_candidate(
     candidate_id: str,
     target_status: str,
     decision: str,
-    reviewed_by: str | None,
     reason: str | None,
     dry_run: bool,
 ) -> ApiResult:
@@ -2804,7 +2780,6 @@ def _move_reviewed_candidate(
             document,
             status=target_status,
             decision=decision,
-            reviewed_by=reviewed_by,
             reason=reason,
         )
         source_relative = str(workspace.relative(record.path))
@@ -3540,7 +3515,7 @@ def _append_field_schema_differences(
 
 def _clean_object_schemas() -> dict[str, dict[str, set[str]]]:
     object_fields = {"id", "type", "title", "status", "created", "updated"}
-    review_fields = {"reviewed_by", "reviewed_at", "review_decision"}
+    review_fields = {"reviewed_at", "review_decision"}
     return {
         "source": {
             "required": object_fields
@@ -4458,7 +4433,6 @@ def _plan_candidate_records(
             "summary": draft["summary"],
             "evidence": draft["evidence"],
             "review": {
-                "reviewed_by": None,
                 "reviewed_at": None,
                 "decision": None,
                 "reason": None,

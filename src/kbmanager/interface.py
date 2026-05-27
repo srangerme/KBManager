@@ -147,12 +147,10 @@ class SlashCommandInterface:
         *,
         api: ApiClient | None = None,
         llm: LlmClient | None = None,
-        reviewed_by: str = "user",
     ) -> None:
         self.root = Path(root)
         self.api = api or ApplicationApiClient(root)
         self.llm = LoggedLlmClient(self.root, llm) if llm is not None else None
-        self.reviewed_by = reviewed_by
 
     def kb_init(self, *, dry_run: bool = False) -> InterfaceResult:
         calls: list[ApiCallRecord] = []
@@ -304,7 +302,6 @@ class SlashCommandInterface:
             source_id=source_id,
             reason=reason,
             decision="deprecate",
-            reviewed_by=self.reviewed_by,
         )
         return self._from_api_result(result, calls, "Deprecated source.")
 
@@ -391,7 +388,6 @@ class SlashCommandInterface:
                 "kb.knowledge.reject",
                 candidate_id=candidate_id,
                 decision="reject",
-                reviewed_by=self.reviewed_by,
                 reason=reason,
             )
         elif decision == "defer":
@@ -400,7 +396,6 @@ class SlashCommandInterface:
                 "kb.candidate.defer",
                 candidate_id=candidate_id,
                 decision="defer",
-                reviewed_by=self.reviewed_by,
                 reason=reason,
             )
         elif decision == "accept":
@@ -434,7 +429,6 @@ class SlashCommandInterface:
                 "kb.knowledge.accept",
                 candidate_id=candidate_id,
                 decision="accept",
-                reviewed_by=self.reviewed_by,
                 reason=reason,
                 title=reviewed.get("title"),
                 summary=reviewed.get("summary"),
@@ -536,7 +530,6 @@ class SlashCommandInterface:
                 candidate_id=candidate_id,
                 target_knowledge_id=merge_targets[0],
                 decision="merge",
-                reviewed_by=self.reviewed_by,
                 reason=reason,
                 title=reviewed.get("title"),
                 summary=reviewed.get("summary"),
@@ -585,7 +578,7 @@ class SlashCommandInterface:
                 {"title": title, "input_path": str(input_path)},
             )
         reviewed = _knowledgebase_review_payload(reviewed_markdown, init_llm_result)
-        review = {"decision": "approve", "reviewed_by": self.reviewed_by} if approve else None
+        review = {"decision": "approve"} if approve else None
         create_result = self._call(
             calls,
             "kb.knowledgebase.create",
@@ -754,7 +747,6 @@ class SlashCommandInterface:
             note_id=note_id,
             reason=reason,
             decision="deprecate",
-            reviewed_by=self.reviewed_by,
         )
         return self._from_api_result(result, calls, "Deprecated note.")
 

@@ -100,7 +100,6 @@ def test_accept_requires_review_and_promotes_candidate(tmp_path: Path) -> None:
         dry_run=False,
         candidate_id=candidate_id,
         decision="accept",
-        reviewed_by="user",
         title="Accepted",
         summary=payload["summary"],
         content=payload["content"],
@@ -133,7 +132,6 @@ def test_accept_rejects_evidence_not_from_candidate(tmp_path: Path) -> None:
         dry_run=False,
         candidate_id=candidate_id,
         decision="accept",
-        reviewed_by="user",
         title="Accepted",
         summary=payload["summary"],
         content=payload["content"],
@@ -154,7 +152,6 @@ def test_accept_rejects_empty_evidence(tmp_path: Path) -> None:
         dry_run=False,
         candidate_id=candidate_id,
         decision="accept",
-        reviewed_by="user",
         title="Accepted",
         summary=payload["summary"],
         content=payload["content"],
@@ -174,7 +171,6 @@ def test_reject_and_defer_move_candidate(tmp_path: Path) -> None:
         dry_run=False,
         candidate_id=candidate_id,
         decision="reject",
-        reviewed_by="user",
         reason="No.",
     ).to_dict()
     assert rejected["status"] == "success"
@@ -187,7 +183,6 @@ def test_reject_and_defer_move_candidate(tmp_path: Path) -> None:
         dry_run=False,
         candidate_id=candidate_id,
         decision="defer",
-        reviewed_by="user",
         reason="Later.",
     ).to_dict()
     assert deferred["status"] == "success"
@@ -202,7 +197,6 @@ def test_merge_updates_target_and_rejects_source_candidate(tmp_path: Path) -> No
         dry_run=False,
         candidate_id=target_id,
         decision="accept",
-        reviewed_by="user",
         title="Target",
         summary=payload["summary"],
         content=payload["content"],
@@ -218,7 +212,6 @@ def test_merge_updates_target_and_rejects_source_candidate(tmp_path: Path) -> No
         candidate_id=candidate_id,
         target_knowledge_id=target_id,
         decision="merge",
-        reviewed_by="user",
         title="Merged",
         summary="Merged summary.",
         content="Merged content.",
@@ -243,7 +236,6 @@ def test_merge_rejects_evidence_that_does_not_reference_source(tmp_path: Path) -
         dry_run=False,
         candidate_id=target_id,
         decision="accept",
-        reviewed_by="user",
         title="Target",
         summary=payload["summary"],
         content=payload["content"],
@@ -259,7 +251,6 @@ def test_merge_rejects_evidence_that_does_not_reference_source(tmp_path: Path) -
         candidate_id=candidate_id,
         target_knowledge_id=target_id,
         decision="merge",
-        reviewed_by="user",
         title="Merged",
         summary="Merged summary.",
         content="Merged content.",
@@ -279,7 +270,6 @@ def test_deprecate_knowledge_records_metadata(tmp_path: Path) -> None:
         dry_run=False,
         candidate_id=candidate_id,
         decision="accept",
-        reviewed_by="user",
         title="Accepted",
         summary=payload["summary"],
         content=payload["content"],
@@ -293,7 +283,6 @@ def test_deprecate_knowledge_records_metadata(tmp_path: Path) -> None:
         dry_run=False,
         knowledge_id=candidate_id,
         decision="deprecate",
-        reviewed_by="user",
         reason="Old.",
     ).to_dict()
 

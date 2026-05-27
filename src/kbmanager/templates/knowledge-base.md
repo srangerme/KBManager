@@ -15,7 +15,6 @@ outlines:
     title: Main outline
     description: Default knowledge structure
     status: active
-reviewed_by:
 reviewed_at:
 review_decision:
 created: YYYY-MM-DDTHH:MM:SS

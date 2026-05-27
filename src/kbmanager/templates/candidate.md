@@ -8,7 +8,6 @@ outline_change_suggestions: []
 summary: Candidate summary
 evidence: []
 review:
-  reviewed_by:
   reviewed_at:
   decision:
   reason:

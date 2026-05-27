@@ -111,7 +111,6 @@ def test_note_add_get_and_deprecate_moves_without_deleting(tmp_path: Path) -> No
         note_id=added["note_id"],
         reason="Old.",
         decision="deprecate",
-        reviewed_by="user",
     ).to_dict()
 
     assert got["status"] == "success"

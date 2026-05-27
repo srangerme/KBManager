@@ -32,6 +32,7 @@
 
 - Interface 层可以为展示和问答只读读取对象文件和索引文件。
 - 只读展示和 review 草案不得打开 VSCode；需要用户编辑时通过 Claude Code UI 回复收集 reviewed content。
+- `kb.knowledgebase.map` 是特许例外：它生成临时派生 Markdown 图，不修改对象或 repo-tracked index，可返回临时路径供本地打开。
 - 只读读取不得产生对象状态变化，不得把索引内容反向写入对象事实。
 - 对象写入 API 会在成功写入后自动调用 `kb.index.rebuild` 重建派生索引；check workflow 直接调用 `kb.index.rebuild`。
 
@@ -98,6 +99,7 @@ requested_in_claude:
   - kind: reviewed_markdown
     action: accept_candidate
     instructions: "Reply with approve or edited Markdown."
+opened_in_vscode: []   # 仅 kb.knowledgebase.map 临时派生图可使用
 errors: []
 next_actions: []
 ```

@@ -25,7 +25,9 @@
 
 ## 2. 通用契约
 
-请求：
+API 函数和 `scripts/kbmanager_plugin.py` 的 payload 使用扁平参数；`operation`
+由被调用的函数或 helper 命令名确定。下面是上层编排系统可以附加的请求
+envelope 示例，不是第二层 API 的必填字段：
 
 ```yml
 request_id: req-20260520-001
@@ -64,6 +66,7 @@ next_actions: []
 - 所有 API 请求必须携带 `entrypoint: claude_code`。
 - 所有 API 请求必须携带 `dry_run: true | false`。`dry_run: true` 时只校验 payload、entrypoint、对象存在性、状态转换前置条件和 review gate 要求，不执行写入、文件移动或 LLM resume。
 - API 必须在入口处校验 operation 是否允许当前 `entrypoint` 调用。不允许时返回 `failed`，错误中说明 operation、entrypoint 和允许入口。
+- `request_id`、`actor`、`context.trace_id` 等 envelope 字段可由 Interface、脚本或未来 server 层用于审计和追踪；当前公开 API 不要求这些字段，也不把它们写入对象事实。
 - `needs_llm` 响应不得产生对象写入、状态变更或文件移动。采集类 API 可以在返回 `failed` 时写入诊断性失败报告，例如 `kb.source.add` 的 URL 采集失败报告写入 `data/failed/`；该失败报告不是 source、candidate、knowledge、knowledge base 或 note 对象，也不得被索引当作事实来源。
 - `needs_review` 响应不得产生任何对象写入、状态变更或文件移动。
 - 对象引用统一使用 ID。pending/deferred/rejected candidate 使用全局 knowledge ID；candidate 被 accept 后，原 candidate 文件被原子提升/迁移为正式 knowledge 文件，同一 ID 不得同时存在 candidate 文件和 knowledge 文件。

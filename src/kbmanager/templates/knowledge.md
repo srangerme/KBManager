@@ -6,7 +6,6 @@ status: accepted
 summary: Knowledge summary
 evidence: []
 bindto: []
-reviewed_by: user
 reviewed_at: YYYY-MM-DDTHH:MM:SS
 review_decision: accept
 review_reason:
