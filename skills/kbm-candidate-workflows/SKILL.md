@@ -1,9 +1,11 @@
 ---
 name: kbm-candidate-workflows
-description: Use for KBManager candidate create, get, next pending, review, defer, reject, accept, and merge workflows.
+description: Use this skill for KBManager candidate workflows whenever the user asks to create candidates from sources, fetch a candidate, show the next pending item, review pending knowledge, accept, reject, defer, merge, approve, edit reviewed payloads, or process candidate decisions. Trigger on candidate create/get/next_pending/review/defer/reject/accept/merge language, pending candidate queues, review items, evidence-backed candidate content, and converting candidates into accepted knowledge. This skill governs candidate lifecycle actions and review-gated candidate decisions.
 ---
 
 # KBManager Candidate Workflows
+
+When this skill is used, explicitly tell the user: `Using skill: kbm-candidate-workflows`.
 
 ## Candidate Create
 

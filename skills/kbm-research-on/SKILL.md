@@ -1,9 +1,11 @@
 ---
 name: kbm-research-on
-description: Generate a ChatGPT Deep Research prompt from a KBManager knowledgebase definition when the user wants to continue research based on that knowledgebase.
+description: Use this skill when the user wants a ChatGPT Deep Research prompt based on an existing KBManager knowledgebase definition. Trigger on requests like research on this knowledgebase, continue research, generate a Deep Research prompt, make a research brief, turn a knowledgebase scope/outline into a research task, or prepare external research instructions from a KBManager knowledgebase. This skill is read-only and should not write KBManager objects or call write APIs.
 ---
 
 # KBManager Research On
+
+When this skill is used, explicitly tell the user: `Using skill: kbm-research-on`.
 
 Generate a prompt for ChatGPT Deep Research from a KBManager knowledgebase.
 

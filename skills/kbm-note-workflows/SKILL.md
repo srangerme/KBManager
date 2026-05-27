@@ -1,9 +1,11 @@
 ---
 name: kbm-note-workflows
-description: Use for KBManager note add, get, list, view, and deprecate workflows.
+description: Use this skill for KBManager note workflows whenever the user asks to add, capture, save, title, get, list, view, show, or deprecate notes. Trigger on note add, note title generation, personal notes, observations, scratch notes, note list/view/get/deprecate language, deprecated note display, and requests involving notes that are not evidence sources for candidate creation. This skill is for note lifecycle actions, not source ingestion or evidence-backed candidate creation.
 ---
 
 # KBManager Note Workflows
+
+When this skill is used, explicitly tell the user: `Using skill: kbm-note-workflows`.
 
 ## Note Add
 

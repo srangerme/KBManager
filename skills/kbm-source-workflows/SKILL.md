@@ -1,9 +1,11 @@
 ---
 name: kbm-source-workflows
-description: Use for KBManager source add and source deprecate workflows.
+description: Use this skill for KBManager source workflows whenever the user asks to add, import, ingest, register, attach, or deprecate sources. Trigger on requests involving source files, directories, URLs, webpages, PDFs, HTML, Markdown, raw research material, source ingestion, source add, source deprecate, or turning external/local material into pending KBManager candidates. This skill is specifically for source lifecycle operations and should be combined with kbm-basic and kbm-api-ui before calling kb.source.add, kb.source.deprecate, or creating candidates from newly added sources.
 ---
 
 # KBManager Source Workflows
+
+When this skill is used, explicitly tell the user: `Using skill: kbm-source-workflows`.
 
 ## Source Add
 

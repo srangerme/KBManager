@@ -1,9 +1,11 @@
 ---
 name: kbm-kb-outline-workflows
-description: Use for KBManager knowledgebase outline create, set-default, archive, and explicit controlled outline YAML update workflows.
+description: Use this skill for KBManager knowledgebase outline workflows whenever the user asks to create an outline, set a default outline, archive an outline, edit/update/reorder/rename/move/split/merge outline YAML nodes, repair outline bindings, or maintain a knowledgebase structure. Trigger on outline create, outline set-default, default outline, archive outline, outline YAML, bindto risks, node IDs, hierarchy changes, section trees, taxonomy changes, and controlled direct edits to existing outline files. This skill is only for knowledgebase outline lifecycle and explicit outline YAML maintenance.
 ---
 
 # KBManager Knowledgebase Outline Workflows
+
+When this skill is used, explicitly tell the user: `Using skill: kbm-kb-outline-workflows`.
 
 ## Outline Create
 

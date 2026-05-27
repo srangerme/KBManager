@@ -1,9 +1,11 @@
 ---
 name: kbm-knowledgebase-workflows
-description: Use for KBManager knowledgebase create, list, and map workflows.
+description: Use this skill for KBManager knowledgebase workflows whenever the user asks to create a knowledgebase, define a knowledgebase scope, list knowledgebases, map a knowledgebase, inspect available knowledgebases, or generate a reviewed knowledgebase draft with title, description, tags, scope, and default outline. Trigger on knowledgebase create/list/map language, KB definition, domain scope, knowledgebase catalog, knowledge map, and approved creation of new KBManager knowledgebase objects. Use outline-specific skill for outline lifecycle or YAML node edits.
 ---
 
 # KBManager Knowledgebase Workflows
+
+When this skill is used, explicitly tell the user: `Using skill: kbm-knowledgebase-workflows`.
 
 ## Knowledgebase Create
 

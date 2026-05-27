@@ -1,9 +1,11 @@
 ---
 name: kbm-api-ui
-description: Use when calling or explaining KBManager APIs from Claude Code UI, including UI-allowed operations, required payload fields, dry_run, review gates, needs_llm, and result handling.
+description: Use this skill whenever Claude Code needs to call, validate, dry-run, resume, or explain KBManager kb.* APIs through scripts/kbmanager_plugin.py. Trigger on API payload construction, entrypoint="claude_code", dry_run requirements, needs_llm handling, needs_review gates, review-gated operations, result status handling, operation IDs, warnings/errors, or questions about which KBManager APIs are callable from Claude Code UI. Combine this with the relevant workflow skill before invoking kb.* operations.
 ---
 
 # KBManager API UI
+
+When this skill is used, explicitly tell the user: `Using skill: kbm-api-ui`.
 
 Use this skill before invoking `scripts/kbmanager_plugin.py` from Claude Code UI
 or documenting UI-callable KBManager operations.

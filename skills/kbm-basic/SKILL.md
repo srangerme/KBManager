@@ -1,9 +1,11 @@
 ---
 name: kbm-basic
-description: Use for KBManager fundamentals: repository structure, object boundaries, file roles, global rules, write prohibitions, review gates, URL handling, index semantics, and controlled direct-edit exceptions.
+description: Use this skill as the baseline for any KBManager task, especially when the user asks about repository structure, object boundaries, file roles, global rules, safe writes, prohibited direct edits, review gates, URL handling, source evidence, derived indexes, controlled direct-edit exceptions, or how KBManager data should be read or modified. Trigger for all KBManager workflows before object writes, API calls, file edits, migrations, candidate/source/knowledge/note/knowledgebase operations, or when deciding whether to use kb.* APIs versus direct file changes.
 ---
 
 # KBManager Basic
+
+When this skill is used, explicitly tell the user: `Using skill: kbm-basic`.
 
 Use this skill before any KBManager workflow when you need the global operating
 rules or repository model.

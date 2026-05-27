@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,23 @@ DEFAULT_MARKETPLACE_ROOT = Path("/home/sranger/codes/claude-code-marketplace")
 MARKETPLACE_NAME = "sranger-marketplace"
 PLUGIN_LINK = Path("plugins/kbm")
 LEGACY_PLUGIN_NAMES = {"kbmanager"}
+PLUGIN_DIRS = (
+    ".claude-plugin",
+    "commands",
+    "scripts",
+    "skills",
+    "src",
+    "system-prompts",
+)
+PLUGIN_FILES = (
+    "pyproject.toml",
+)
+COPY_IGNORE = shutil.ignore_patterns(
+    "__pycache__",
+    "*.pyc",
+    "*.pyo",
+    ".DS_Store",
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -40,18 +58,40 @@ def _plugin_entry(repo_root: Path) -> dict[str, Any]:
     }
 
 
+def _remove_existing_plugin_target(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.exists():
+        shutil.rmtree(path)
+
+
+def _copy_plugin_files(source_root: Path, target_root: Path) -> None:
+    _remove_existing_plugin_target(target_root)
+    target_root.mkdir(parents=True)
+
+    for relative_dir in PLUGIN_DIRS:
+        source = source_root / relative_dir
+        target = target_root / relative_dir
+        if not source.is_dir():
+            raise SystemExit(f"required plugin directory missing: {source}")
+        shutil.copytree(source, target, ignore=COPY_IGNORE)
+
+    for relative_file in PLUGIN_FILES:
+        source = source_root / relative_file
+        target = target_root / relative_file
+        if not source.is_file():
+            raise SystemExit(f"required plugin file missing: {source}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+
 def register_plugin(marketplace_root: Path, repo_root: Path = REPO_ROOT) -> Path:
     marketplace_path = marketplace_root / ".claude-plugin/marketplace.json"
-    plugin_link = marketplace_root / PLUGIN_LINK
+    plugin_root = marketplace_root / PLUGIN_LINK
     entry = _plugin_entry(repo_root)
 
-    plugin_link.parent.mkdir(parents=True, exist_ok=True)
-    if plugin_link.is_symlink() or not plugin_link.exists():
-        if plugin_link.exists() or plugin_link.is_symlink():
-            plugin_link.unlink()
-        plugin_link.symlink_to(repo_root.resolve(), target_is_directory=True)
-    elif plugin_link.resolve() != repo_root.resolve():
-        raise SystemExit(f"{plugin_link} exists and does not point to {repo_root.resolve()}")
+    plugin_root.parent.mkdir(parents=True, exist_ok=True)
+    _copy_plugin_files(repo_root, plugin_root)
 
     if marketplace_path.exists():
         marketplace = _read_json(marketplace_path)

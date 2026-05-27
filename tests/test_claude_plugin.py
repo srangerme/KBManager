@@ -61,7 +61,40 @@ def test_register_marketplace_script_adds_current_plugin(tmp_path: Path) -> None
     assert plugin["name"] == "kbm"
     assert plugin["source"] == "./plugins/kbm"
     assert plugin["version"] == manifest["version"]
-    assert (tmp_path / "plugins/kbm").resolve() == REPO_ROOT
+    plugin_root = tmp_path / "plugins/kbm"
+    assert plugin_root.is_dir()
+    assert not plugin_root.is_symlink()
+    assert (plugin_root / "commands/ask.md").is_file()
+    assert (plugin_root / "skills/kbm-basic/SKILL.md").is_file()
+    assert (plugin_root / "scripts/kbmanager_plugin.py").is_file()
+    assert (plugin_root / "src/kbmanager/application.py").is_file()
+    assert (plugin_root / "system-prompts/source-ingest.md").is_file()
+
+
+def test_register_marketplace_script_copies_only_plugin_package(tmp_path: Path) -> None:
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    import register_marketplace
+
+    register_marketplace.register_plugin(tmp_path)
+
+    plugin_root = tmp_path / "plugins/kbm"
+    assert {path.name for path in plugin_root.iterdir()} == {
+        "commands",
+        "pyproject.toml",
+        "scripts",
+        "skills",
+        "src",
+        "system-prompts",
+    }
+    assert (plugin_root / "scripts/kbmanager_plugin.py").is_file()
+    assert (plugin_root / "scripts/register_marketplace.py").is_file()
+    assert not (plugin_root / ".claude-plugin").exists()
+    assert not (plugin_root / "README.md").exists()
+    assert not (plugin_root / "docs").exists()
+    assert not (plugin_root / "tests").exists()
+    assert not (plugin_root / ".git").exists()
+    assert not (plugin_root / ".pytest_cache").exists()
+    assert not (plugin_root / ".ruff_cache").exists()
 
 
 def test_register_marketplace_script_replaces_existing_plugin(tmp_path: Path) -> None:
@@ -122,11 +155,16 @@ def test_command_api_operations_are_supported_by_plugin_helper() -> None:
     assert "kb.*" in command
 
 
-def test_claude_plugin_package_does_not_contain_user_data_roots() -> None:
+def test_claude_plugin_package_does_not_contain_user_data_roots(tmp_path: Path) -> None:
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    import register_marketplace
+
+    register_marketplace.register_plugin(tmp_path)
+    plugin_root = tmp_path / "plugins/kbm"
     forbidden = {".lark", "data", "knowledge", "candidates", "notes", "indexes"}
 
     for name in forbidden:
-        assert not (REPO_ROOT / name).exists()
+        assert not (plugin_root / name).exists()
 
 
 def test_plugin_helper_invokes_api_with_project_dir(tmp_path: Path) -> None:

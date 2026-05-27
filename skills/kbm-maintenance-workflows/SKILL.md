@@ -1,9 +1,11 @@
 ---
 name: kbm-maintenance-workflows
-description: Use for KBManager init, check, clean inspect, and clean migration workflows.
+description: Use this skill for KBManager maintenance workflows whenever the user asks to initialize a KBManager workspace, check consistency, rebuild indexes, inspect layout/schema cleanliness, clean or migrate the repository, generate or execute a migration plan, validate object/index state, or repair structural issues through an approved migration. Trigger on kb.init, kb.index.rebuild, kb.clean.inspect, clean migration, init/check/clean/migrate language, derived index rebuilding, and reviewed maintenance plans.
 ---
 
 # KBManager Maintenance Workflows
+
+When this skill is used, explicitly tell the user: `Using skill: kbm-maintenance-workflows`.
 
 ## Init
 
