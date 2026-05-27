@@ -389,8 +389,8 @@ candidates:
 - 写入：临时 Markdown 文件；不写入 repo-tracked index 或对象文件。
 - LLM 辅助：不需要。
 - Review gate：不需要，因为输出是派生视图。
-- 输出：临时 Markdown 路径、Mermaid Markdown 内容、未绑定 knowledge、无效 outline 节点引用和其他结构一致性问题。
-- 约束：Mermaid 图表达 outline 节点与绑定 knowledge 的结构；不从 knowledge relation 推导树状层级。
+- 输出：临时 Markdown 路径、从左到右展开的 Mermaid Markdown 内容、未绑定 knowledge、无效 outline 节点引用和其他结构一致性问题。
+- 约束：Mermaid 图使用 `flowchart LR` 表达 outline 节点与绑定 knowledge 的结构；不从 knowledge relation 推导树状层级。
 
 ## 9. Note API
 

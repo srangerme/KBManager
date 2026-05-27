@@ -19,7 +19,7 @@
 | `/init` | 不改主流程 | 初始化流程不受模型变化影响。 |
 | `/knowledgebase create <path-or-url>` | 修改 | 从 source-like input 生成 create 阶段字段，经用户 review 后一次性创建 active knowledgebase 和 outlines YAML，不创建 source。 |
 | `/knowledgebase list` | 字段同步 | 只读流程不变，展示内容随索引包含 knowledgebase 和成员视图。 |
-| `/knowledgebase map [knowledgebase-id]` | 修改 | 基于默认 outline 和 `bindto`，不再基于 knowledge 层级关系。 |
+| `/knowledgebase map [knowledgebase-id]` | 修改 | 基于默认 outline 和 `bindto` 生成从左到右展开的结构图，不再基于 knowledge 层级关系。 |
 | `/knowledgebase outline create/set-default/archive` | 新增 | 独立管理 knowledgebase outline，均需用户 review。 |
 | `/lark server start/status/stop` | 不改主流程 | server 生命周期不受知识模型变化影响。 |
 | `/note add/list/view/deprecate` | 不改主流程 | note 操作流程不受知识模型变化影响。 |
@@ -116,7 +116,7 @@ flowchart TD
 ```mermaid
 flowchart TD
   A["(user) 输入命令"] --> B["(api) kb.knowledgebase.map"]
-  B --> C["(interface) 展示基于 outline + bindto 的临时 Mermaid Markdown 文件"]
+  B --> C["(interface) 展示基于 outline + bindto 的从左到右展开的临时 Mermaid Markdown 文件"]
   C --> D{"(interface) VSCode 是否可用"}
   D -- 是 --> E["(interface) code --reuse-window 打开临时文件"]
   D -- 否 --> F["(interface) 展示临时文件路径和 Markdown 内容"]

@@ -193,6 +193,18 @@ def test_message_accumulator_no_longer_treats_slash_source_as_protocol() -> None
     assert blocks[0].content == "/source first line"
 
 
+def test_message_accumulator_recognizes_lark_map_command() -> None:
+    accumulator = lark_server.MessageAccumulator()
+
+    blocks = accumulator.ingest(
+        lark_server.IncomingMessage("chat", "user", "m1", "map kb-20260525-001")
+    )
+
+    assert len(blocks) == 1
+    assert blocks[0].kind == "map"
+    assert blocks[0].content == "kb-20260525-001"
+
+
 def test_message_accumulator_recognizes_lark_commands() -> None:
     accumulator = lark_server.MessageAccumulator()
 
@@ -200,6 +212,7 @@ def test_message_accumulator_recognizes_lark_commands() -> None:
         "help": ("help", ""),
         "view note-20260525-001": ("view", "note-20260525-001"),
         "list kb": ("list", "kb"),
+        "map": ("map", ""),
         "ask what is here?": ("ask", "what is here?"),
     }
 
@@ -788,6 +801,7 @@ def test_worker_replies_to_help_synchronously(tmp_path: Path) -> None:
     assert len(replies.markdowns) == 1
     assert replies.markdowns[0].startswith("# KBManager Help")
     assert "view <id>" in replies.markdowns[0]
+    assert "map [kb-id]" in replies.markdowns[0]
     assert replies.files == []
     assert worker.jobs.empty()
 
@@ -827,6 +841,46 @@ def test_worker_replies_to_list_with_markdown(tmp_path: Path) -> None:
         "共 1 条\n\n"
             "- First note(note-20260525-001，active)，Remember this note.\n"
     ]
+
+
+def test_worker_replies_to_map_with_markdown_file(monkeypatch, tmp_path: Path) -> None:
+    output = tmp_path / "map.md"
+    output.write_text("# Map\n\n```mermaid\nflowchart LR\n```\n", encoding="utf-8")
+    calls: list[dict[str, Any]] = []
+
+    def knowledgebase_map(root: Path, **kwargs: Any) -> FakeApiResult:
+        calls.append({"root": root, **kwargs})
+        return FakeApiResult(
+            {
+                "status": "success",
+                "operation": "kb.knowledgebase.map",
+                "objects": {"created": [], "updated": [], "deprecated": []},
+                "diffs": [],
+                "warnings": [],
+                "errors": [],
+                "review": {"required": False, "options": []},
+                "next_actions": [],
+                "path": str(output),
+                "markdown": output.read_text(encoding="utf-8"),
+                "issues": [],
+                "knowledgebase_id": "kb-20260525-001",
+            }
+        )
+
+    monkeypatch.setattr(lark_server.application, "knowledgebase_map", knowledgebase_map)
+    replies = RecordingReplies()
+    worker = lark_server.Worker(lark_server.JobProcessor(tmp_path), replies)
+
+    worker.submit(lark_server.MessageBlock("map", "chat", "user", "m1", "kb-20260525-001"))
+
+    assert calls == [{"root": tmp_path, "knowledgebase_id": "kb-20260525-001"}]
+    assert replies.markdowns == [
+        f"# Knowledgebase Map\n\n"
+        f"Generated map for `kb-20260525-001`.\n\n"
+        f"File: `{output}`\n"
+    ]
+    assert replies.files == [output]
+    assert worker.jobs.empty()
 
 
 def test_worker_queues_ask_with_specific_ack(tmp_path: Path) -> None:

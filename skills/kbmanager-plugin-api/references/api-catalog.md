@@ -152,7 +152,7 @@ No API call is required. Do not rebuild indexes from this command; suggest `/kbm
 
 ### `/kbm:knowledgebase-map [knowledgebase-id]`
 
-Generate a temporary Mermaid map.
+Generate a temporary left-to-right Mermaid map.
 
 Payload for `kb.knowledgebase.map`:
 
@@ -373,7 +373,7 @@ These commands must not create or edit KBManager object files directly.
 - Required: `knowledgebase_id`, `outline_id`, `review.decision: "approve"`.
 - Optional: `allow_existing_bindings`.
 
-`kb.knowledgebase.map`: generate Mermaid map.
+`kb.knowledgebase.map`: generate left-to-right Mermaid map.
 
 - Optional: `knowledgebase_id`, `output_path`.
 
@@ -413,6 +413,7 @@ After `/kbm:lark-server-start`, incoming Feishu/Lark messages in the user worksp
 - `list kb`: return `indexes/kb-index.md`.
 - `list <kb-id>`: return `indexes/knowledgebase/<kb-id>-knowledge-index.md`.
 - `list note`: return `indexes/note-index.md`.
+- `map [kb-id]`: call `kb.knowledgebase.map` and send the generated left-to-right Mermaid Markdown file.
 - `ask <question>`: run read-oriented Claude Code answer in the workspace.
 - `note <content>`: add a note.
 - Plain source text, URL, or a single `.md` or `.pdf` file: treat as source input.

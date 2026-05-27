@@ -180,5 +180,6 @@ def test_knowledgebase_map_writes_outline_bindto_mermaid(tmp_path: Path) -> None
     markdown = output.read_text(encoding="utf-8")
     assert result["status"] == "success"
     assert "```mermaid" in markdown
+    assert "flowchart LR" in markdown
     assert "Section 1" in markdown
     assert "Accepted Knowledge" in markdown

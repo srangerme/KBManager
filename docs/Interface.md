@@ -253,7 +253,7 @@ resume:
 ### `/knowledgebase map [knowledgebase-id]`
 
 - 输入：可选 knowledgebase ID。
-- 行为：根据 knowledgebase `outline` 和 knowledge `bindto` 生成 Mermaid 结构图，写入临时 Markdown 文件，并用 VSCode 打开。
+- 行为：根据 knowledgebase `outline` 和 knowledge `bindto` 生成从左到右展开的 Mermaid 结构图，写入临时 Markdown 文件，并用 VSCode 打开。
 - API 编排：`kb.knowledgebase.map`。
 - 输出：临时 Markdown 路径、无效 bindto/outline 问题；如果 VSCode 不可用，则在 Claude Code 中展示路径和 Markdown 内容。
 

@@ -1717,7 +1717,7 @@ def _knowledgebase_map_markdown(
         f"# {title}",
         "",
         "```mermaid",
-        "flowchart TD",
+        "flowchart LR",
     ]
     if not knowledgebases:
         lines.append('  empty["No active knowledgebase"]')

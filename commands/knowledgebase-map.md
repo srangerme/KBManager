@@ -6,8 +6,8 @@ description: Open a Mermaid knowledgebase outline map in VSCode
 
 Use `$ARGUMENTS` as an optional `knowledgebase_id`. This command is read-only.
 
-- Without an ID, generate a Mermaid map for all active knowledgebase outlines and accepted knowledge bindings.
-- With an ID, generate a Mermaid map for that knowledgebase outline and accepted knowledge bound through `bindto`.
+- Without an ID, generate a left-to-right Mermaid map for all active knowledgebase outlines and accepted knowledge bindings.
+- With an ID, generate a left-to-right Mermaid map for that knowledgebase outline and accepted knowledge bound through `bindto`.
 - The map is written to a temporary Markdown file outside the repository and opened in VSCode.
 
 Call `kb.knowledgebase.map` through the plugin helper:

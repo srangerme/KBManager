@@ -444,7 +444,7 @@ class JobProcessor:
                 job.block.kind,
                 job.block.chat_id,
             )
-            if job.block.kind in {"help", "list", "view", "ask"}:
+            if job.block.kind in {"help", "list", "map", "view", "ask"}:
                 return self._process_command(job.block)
             if self.git is not None:
                 stash_ref = self.git.prepare(job.job_id)
@@ -487,6 +487,9 @@ class JobProcessor:
                     message=_list_text(self.root, block.content),
                     markdown=True,
                 )
+            if block.kind == "map":
+                text, files = _map_text(self.root, block.content)
+                return JobResult(success=True, message=text, files=files, markdown=True)
             if block.kind == "view":
                 text, files = _view_object(self.root, block.content)
                 return JobResult(success=True, message=text, files=files, markdown=True)
@@ -637,7 +640,7 @@ class Worker:
 
     def submit(self, block: MessageBlock) -> str:
         job_id = uuid.uuid4().hex[:12]
-        if block.kind in {"help", "list", "view"}:
+        if block.kind in {"help", "list", "map", "view"}:
             LOGGER.info("processing sync command job_id=%s kind=%s", job_id, block.kind)
             result = self.processor.process(Job(job_id=job_id, block=block))
             self._reply_result(job_id, block, result, include_prefix=False)
@@ -706,10 +709,12 @@ def _parse_lark_command(text: str) -> tuple[str, str] | None:
     folded = stripped.casefold()
     if folded == "help":
         return ("help", "")
-    for name in ("view", "list", "ask"):
+    for name in ("view", "list", "map", "ask"):
         prefix = f"{name} "
         if folded.startswith(prefix):
             return (name, stripped[len(prefix) :].strip())
+    if folded == "map":
+        return ("map", "")
     return None
 
 
@@ -738,6 +743,9 @@ list <kb-id>
 list note
   列出 note。
 
+map [kb-id]
+  生成 knowledge base map，并发送临时 Markdown 文件。
+
 ask <question>
   让 Claude Code 基于当前用户侧 git 工作区回答问题。
 
@@ -752,6 +760,7 @@ def _help_card() -> str:
         "- **list kb**: 列出 knowledge base。\n"
         "- **list <kb-id>**: 列出指定 knowledge base 下的 knowledge，例如 list kb-20260525-001。\n"
         "- **list note**: 列出 note。\n"
+        "- **map [kb-id]**: 生成 knowledge base map，并发送临时 Markdown 文件。\n"
         "- **ask <question>**: 让 Claude Code 基于当前用户侧 git 工作区回答问题。\n\n"
         "其他文本默认按 source 导入；以 note 开头的文本按 note 添加。\n"
     )
@@ -782,6 +791,32 @@ def _list_text(root: Path, target: str) -> str:
             _read_workspace_text(root, f"indexes/knowledgebase/{item}-knowledge-index.md")
         )
     raise ValueError("list target must be kb, note, or a kb-* ID")
+
+
+def _map_text(root: Path, target: str) -> tuple[str, tuple[Path, ...]]:
+    item = target.strip()
+    if item and not item.startswith("kb-"):
+        raise ValueError("map target must be empty or a kb-* ID")
+    result = application.knowledgebase_map(
+        root,
+        knowledgebase_id=item or None,
+    ).to_dict()
+    if result.get("status") != ApiStatus.SUCCESS.value:
+        errors = result.get("errors") or []
+        if errors and isinstance(errors[0], dict):
+            raise ValueError(str(errors[0].get("message") or "knowledgebase map failed"))
+        raise ValueError("knowledgebase map failed")
+    path = Path(str(result["path"]))
+    warnings = result.get("warnings") or []
+    warning_text = ""
+    if warnings:
+        warning_text = "\n\n## Issues\n\n" + "\n".join(f"- {warning}" for warning in warnings)
+    target_text = item if item else "all active knowledge bases"
+    return (
+        f"# Knowledgebase Map\n\nGenerated map for `{target_text}`.\n\nFile: `{path}`"
+        f"{warning_text}\n",
+        (path,),
+    )
 
 
 def _lark_list_text(workspace: Workspace, list_kind: str, markdown: str) -> str:

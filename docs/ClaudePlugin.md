@@ -151,6 +151,7 @@ view <id>
 list kb
 list <kb-id>
 list note
+map [kb-id]
 ask <question>
 note <content>
 <plain source text, URL, or one .md/.pdf file>
@@ -164,6 +165,8 @@ note <content>
 - `list kb` returns `indexes/kb-index.md`; `list <kb-id>` returns
   `indexes/knowledgebase/<kb-id>-knowledge-index.md`; `list note` returns
   `indexes/note-index.md`.
+- `map [kb-id]` calls `kb.knowledgebase.map` and sends the generated
+  left-to-right Mermaid Markdown file.
 - `ask <question>` runs `claude -p` in the current user workspace and replies
   with plain text. The prompt instructs Claude Code to read workspace files only
   as needed, avoid file writes or Git state changes, and return any required
