@@ -17,6 +17,7 @@ from urllib.request import Request, urlopen
 
 import kbmanager.application as application
 from kbmanager.contracts import ApiStatus
+from kbmanager.llm_logging import write_llm_log
 from kbmanager.prompts import assemble_prompt, schema_for_output
 from kbmanager.repository import ObjectRepository
 from kbmanager.workspace import Workspace
@@ -97,6 +98,44 @@ class ApplicationApiClient:
         return function(self.root, **kwargs).to_dict()
 
 
+class LoggedLlmClient:
+    """Record every delegated LLM request and response in the workspace."""
+
+    def __init__(self, root: str | Path, delegate: LlmClient) -> None:
+        self.root = Path(root)
+        self.delegate = delegate
+
+    def complete(
+        self,
+        *,
+        purpose: str,
+        llm_request: dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
+        user_input: str | None = None,
+        prompt: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        input_payload = {
+            "purpose": purpose,
+            "llm_request": llm_request,
+            "context": context,
+            "user_input": user_input,
+            "prompt": prompt,
+        }
+        try:
+            result = self.delegate.complete(
+                purpose=purpose,
+                llm_request=llm_request,
+                context=context,
+                user_input=user_input,
+                prompt=prompt,
+            )
+        except Exception as exc:
+            write_llm_log(self.root, purpose=purpose, input_payload=input_payload, error=str(exc))
+            raise
+        write_llm_log(self.root, purpose=purpose, input_payload=input_payload, output_payload=result)
+        return result
+
+
 class SlashCommandInterface:
     def __init__(
         self,
@@ -108,7 +147,7 @@ class SlashCommandInterface:
     ) -> None:
         self.root = Path(root)
         self.api = api or ApplicationApiClient(root)
-        self.llm = llm
+        self.llm = LoggedLlmClient(self.root, llm) if llm is not None else None
         self.reviewed_by = reviewed_by
 
     def kb_init(self, *, dry_run: bool = False) -> InterfaceResult:

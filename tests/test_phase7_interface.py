@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -118,6 +119,28 @@ def test_source_add_orchestrates_source_and_candidate_llm_resumes() -> None:
         "kb.candidate.create",
         "kb.candidate.create",
     ]
+
+
+def test_interface_logs_llm_input_and_output(tmp_path: Path) -> None:
+    api = MockApi(
+        {
+            "kb.note.add": [
+                _needs_llm("kb.note.add", "note-token"),
+                _success("kb.note.add", note_id="note-1"),
+            ],
+        }
+    )
+    llm = MockLlm({"note_title": {"title": "Generated note"}})
+
+    result = SlashCommandInterface(root=tmp_path, api=api, llm=llm).kb_note_add(content="Body")
+
+    assert result.to_dict()["status"] == "success"
+    log_files = list((tmp_path / ".claude/log").glob("*.json"))
+    assert len(log_files) == 1
+    record = json.loads(log_files[0].read_text(encoding="utf-8"))
+    assert record["purpose"] == "note_title"
+    assert record["input"]["context"] == {"content": "Body"}
+    assert record["output"] == {"title": "Generated note"}
 
 
 def test_candidate_review_waits_for_decision_after_assist() -> None:

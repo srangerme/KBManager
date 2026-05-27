@@ -23,6 +23,7 @@ import yaml
 
 from kbmanager import application
 from kbmanager.contracts import ApiStatus
+from kbmanager.llm_logging import write_llm_log
 from kbmanager.repository import ObjectRepository
 from kbmanager.workspace import Workspace
 
@@ -149,6 +150,11 @@ class ClaudeCliLlm:
         purpose = llm_request.get("purpose")
         request_id = llm_request.get("id")
         debug_log = _claude_debug_log_path(self.root, purpose, request_id)
+        input_payload = {
+            "llm_request": llm_request,
+            "prompt_text": prompt,
+            "debug_log": str(debug_log),
+        }
         LOGGER.info(
             "running claude request purpose=%s id=%s debug_log=%s",
             purpose,
@@ -177,6 +183,12 @@ class ClaudeCliLlm:
             )
         except subprocess.TimeoutExpired as exc:
             elapsed = time.monotonic() - started
+            write_llm_log(
+                self.root,
+                purpose=str(purpose) if purpose is not None else None,
+                input_payload=input_payload,
+                error=f"claude -p timed out after {self.timeout_seconds}s",
+            )
             LOGGER.error(
                 "claude request timed out purpose=%s id=%s elapsed=%.2fs timeout=%ss "
                 "debug_log=%s",
@@ -190,6 +202,13 @@ class ClaudeCliLlm:
                 f"claude -p timed out after {self.timeout_seconds}s; debug log: {debug_log}"
             ) from exc
         elapsed = time.monotonic() - started
+        output_payload = {
+            "returncode": completed.returncode,
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+            "elapsed_seconds": elapsed,
+            "debug_log": str(debug_log),
+        }
         LOGGER.info(
             "claude request exited purpose=%s id=%s returncode=%s elapsed=%.2fs "
             "stdout_bytes=%s stderr_bytes=%s debug_log=%s",
@@ -203,6 +222,13 @@ class ClaudeCliLlm:
         )
         if completed.returncode != 0:
             stderr = completed.stderr.strip() or completed.stdout.strip()
+            write_llm_log(
+                self.root,
+                purpose=str(purpose) if purpose is not None else None,
+                input_payload=input_payload,
+                output_payload=output_payload,
+                error=f"claude -p failed: {stderr}",
+            )
             LOGGER.error(
                 "claude request failed purpose=%s id=%s debug_log=%s detail=%s",
                 purpose,
@@ -214,6 +240,13 @@ class ClaudeCliLlm:
         try:
             result = _parse_structured_output(completed.stdout)
         except Exception as exc:
+            write_llm_log(
+                self.root,
+                purpose=str(purpose) if purpose is not None else None,
+                input_payload=input_payload,
+                output_payload=output_payload,
+                error=f"failed to parse claude output: {exc}",
+            )
             LOGGER.exception(
                 "failed to parse claude output purpose=%s id=%s debug_log=%s stdout_preview=%r",
                 purpose,
@@ -226,6 +259,13 @@ class ClaudeCliLlm:
                 raw_output=completed.stdout,
                 debug_log=debug_log,
             ) from exc
+        output_payload["parsed_result"] = result
+        write_llm_log(
+            self.root,
+            purpose=str(purpose) if purpose is not None else None,
+            input_payload=input_payload,
+            output_payload=output_payload,
+        )
         LOGGER.info(
             "claude request completed purpose=%s id=%s debug_log=%s",
             purpose,
@@ -243,6 +283,11 @@ class ClaudeTextCli:
     def complete(self, question: str) -> str:
         debug_log = _claude_debug_log_path(self.root, "lark_ask", uuid.uuid4().hex[:8])
         prompt = _ask_prompt(question)
+        input_payload = {
+            "question": question,
+            "prompt_text": prompt,
+            "debug_log": str(debug_log),
+        }
         LOGGER.info("running claude ask debug_log=%s", debug_log)
         started = time.monotonic()
         try:
@@ -265,10 +310,23 @@ class ClaudeTextCli:
                 timeout=self.timeout_seconds,
             )
         except subprocess.TimeoutExpired as exc:
+            write_llm_log(
+                self.root,
+                purpose="lark_ask",
+                input_payload=input_payload,
+                error=f"claude -p ask timed out after {self.timeout_seconds}s",
+            )
             raise RuntimeError(
                 f"claude -p ask timed out after {self.timeout_seconds}s; debug log: {debug_log}"
             ) from exc
         elapsed = time.monotonic() - started
+        output_payload = {
+            "returncode": completed.returncode,
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+            "elapsed_seconds": elapsed,
+            "debug_log": str(debug_log),
+        }
         LOGGER.info(
             "claude ask exited returncode=%s elapsed=%.2fs debug_log=%s",
             completed.returncode,
@@ -277,8 +335,23 @@ class ClaudeTextCli:
         )
         if completed.returncode != 0:
             detail = completed.stderr.strip() or completed.stdout.strip()
+            write_llm_log(
+                self.root,
+                purpose="lark_ask",
+                input_payload=input_payload,
+                output_payload=output_payload,
+                error=f"claude -p ask failed: {detail}",
+            )
             raise RuntimeError(f"claude -p ask failed: {detail}; debug log: {debug_log}")
-        return completed.stdout.strip() or "(Claude Code returned an empty answer.)"
+        answer = completed.stdout.strip() or "(Claude Code returned an empty answer.)"
+        output_payload["answer"] = answer
+        write_llm_log(
+            self.root,
+            purpose="lark_ask",
+            input_payload=input_payload,
+            output_payload=output_payload,
+        )
+        return answer
 
 
 class GitRunner:

@@ -583,6 +583,12 @@ def test_claude_cli_runs_in_workspace_with_bypass_permissions(
     assert "note_title" in debug_file.name
     assert "llm-1" in debug_file.name
     assert debug_file.parent.is_dir()
+    log_files = list((tmp_path / ".claude/log").glob("*.json"))
+    assert len(log_files) == 1
+    record = json.loads(log_files[0].read_text(encoding="utf-8"))
+    assert record["purpose"] == "note_title"
+    assert record["input"]["llm_request"]["id"] == "llm-1"
+    assert record["output"]["parsed_result"] == result
 
 
 def test_claude_cli_failure_mentions_debug_log(
@@ -653,6 +659,12 @@ def test_claude_text_cli_returns_plain_stdout_and_uses_read_only_prompt(
     assert "What do we know?" in prompt
     assert not prompt.startswith("Return only JSON")
     assert captured["kwargs"]["cwd"] == tmp_path
+    log_files = list((tmp_path / ".claude/log").glob("*.json"))
+    assert len(log_files) == 1
+    record = json.loads(log_files[0].read_text(encoding="utf-8"))
+    assert record["purpose"] == "lark_ask"
+    assert record["input"]["question"] == "What do we know?"
+    assert record["output"]["answer"] == "Plain answer"
 
 
 def test_llm_prompt_text_renders_sections_with_priority_rules() -> None:
