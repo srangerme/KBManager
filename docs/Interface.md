@@ -123,13 +123,10 @@ next_actions: []
 系统提示词类型：
 
 - `source-ingest.md`：生成 source `summary`、`tags` 和清洗内容。
-- `source-ingest-prompt-rewrite.md`：把 Claude Code UI 中的临时 `user_prompt` 重写为安全 prompt fragment。
 - `candidate-create.md`：生成 pending candidate 草案。
-- `candidate-review-assist.md`：生成只读 review 辅助说明。
-- `knowledge-merge-assist.md`：生成 merge 草案和 `bindto` 建议。
 - `note-title.md`：为 note 生成标题。
 - `clean-migration-plan.md`：根据工作区差异生成迁移计划。
-- `knowledgebase-create.md`：根据 source-like input 生成 knowledgebase 草案。
+- `knowledgebase-create.md`：根据 source-like input 生成 knowledgebase 草案，由 `kb.knowledgebase.create` 的 `needs_llm` 返回。
 
 组装顺序：
 
@@ -217,8 +214,8 @@ dry_run: false
 - Init：`kb.init`。
 - Source add：`kb.source.add` -> handle `needs_llm` -> 必然调用 `kb.candidate.create` -> handle `needs_llm`；该 workflow 的语义是导入 source 并创建 pending candidates。
 - Note add：收集 content；用户未提供标题时通过 `kb.note.add` 触发 title `needs_llm`；随后 resume 并写入 note。
-- Candidate review：`kb.candidate.get` 或 `kb.candidate.next_pending` -> review assist -> user decision -> review-gated API。
-- Knowledgebase create：临时 source-like context -> draft -> user review -> `kb.knowledgebase.create`。
+- Candidate review：`kb.candidate.get` 或 `kb.candidate.next_pending` -> skill 只读 review assist -> user decision -> review-gated API。
+- Knowledgebase create：`kb.knowledgebase.create` -> handle `needs_llm` -> resume -> user review -> approved `kb.knowledgebase.create`。
 - Outline create/set-default/archive：收集 ID 和 review -> matching outline API。
 - List/view：只读展示对象或索引。
 - Map：`kb.knowledgebase.map`。

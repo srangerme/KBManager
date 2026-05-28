@@ -53,11 +53,11 @@ All KBManager skills use the `kbm-` prefix:
 - `kbm-maintenance`: init, check, clean inspect, and clean migration workflows.
 - `kbm-research-on`: generate a Deep Research prompt from a knowledgebase.
 
-Internal LLM steps such as source ingest, candidate creation, review assistance,
-merge assistance, note title generation, clean migration planning, and
-knowledgebase drafting remain `system-prompts/` modules. They are triggered by
-API `needs_llm` or `/kbm:ask` workflow orchestration, not by direct user skill
-selection unless a skill explicitly describes that behavior.
+Internal LLM steps such as source ingest, candidate creation, note title
+generation, clean migration planning, and knowledgebase drafting remain
+`system-prompts/` modules triggered by API `needs_llm`. Review assistance and
+temporary source-ingest prompt guidance are skill/ask workflow rules, not
+standalone system prompt files.
 
 ## Runtime Flow
 

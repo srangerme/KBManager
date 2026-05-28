@@ -20,12 +20,9 @@ INSTALLED_SYSTEM_PROMPTS_DIR = (
 
 PROMPT_BY_PURPOSE = {
     "source_ingest": "source-ingest",
-    "source_ingest_prompt_rewrite": "source-ingest-prompt-rewrite",
     "create_candidate": "candidate-create",
     "note_title": "note-title",
     "clean_migration_plan": "clean-migration-plan",
-    "candidate_review_assist": "candidate-review-assist",
-    "knowledge_merge_assist": "knowledge-merge-assist",
     "knowledgebase_create": "knowledgebase-create",
 }
 
@@ -47,16 +44,6 @@ OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": "object",
         "required": ["sources"],
         "properties": {"sources": "list[source_ingest_result]"},
-    },
-    "source_ingest_prompt_rewrite": {
-        "type": "object",
-        "required": ["rewritten_prompt", "intent_summary", "constraints", "warnings"],
-        "properties": {
-            "rewritten_prompt": "non-empty string",
-            "intent_summary": "non-empty string",
-            "constraints": "list[string]",
-            "warnings": "list[string]",
-        },
     },
     "candidate_draft_list": {
         "type": "object",
@@ -93,20 +80,6 @@ OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
             "risks": "list[string]",
             "execution_order": "list[string]",
         },
-    },
-    "candidate_review_assist": {
-        "type": "object",
-        "required": ["summary", "evidence_review", "bindto", "recommendations"],
-        "properties": {
-            "summary": "non-empty string",
-            "evidence_review": "list[object]",
-            "bindto": "list[{kb_id, outline_id, node_id, reason}]",
-            "recommendations": "list[object|string]",
-        },
-    },
-    "knowledge_merge_assist": {
-        "type": "object",
-        "required": ["merged_summary", "merged_content", "evidence", "bindto", "evidence_review"],
     },
     "knowledgebase_create_draft": {
         "type": "object",

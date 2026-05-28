@@ -9,20 +9,15 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
-from html import escape
 from pathlib import Path
 from typing import Any, Protocol
-from urllib.parse import urlparse
-from urllib.request import Request, urlopen
 
 import kbmanager.application as application
 from kbmanager.contracts import ApiStatus
 from kbmanager.llm_logging import write_llm_log
-from kbmanager.prompts import assemble_prompt, schema_for_output
+from kbmanager.prompts import schema_for_output
 from kbmanager.repository import ObjectRepository
 from kbmanager.workspace import Workspace
-
-MAX_KNOWLEDGEBASE_INPUT_BYTES = 5 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -181,7 +176,7 @@ class SlashCommandInterface:
                         calls,
                         [],
                         "Source ingest prompt rewrite returned an invalid result.",
-                        "source_ingest_prompt_rewrite",
+                        "source_ingest_prompt",
                         str(exc),
                     )
                 return InterfaceResult(
@@ -212,7 +207,7 @@ class SlashCommandInterface:
                     calls,
                     [],
                     "Source ingest prompt rewrite returned an invalid result.",
-                    "source_ingest_prompt_rewrite",
+                    "source_ingest_prompt",
                     str(exc),
                 )
 
@@ -329,43 +324,7 @@ class SlashCommandInterface:
 
         candidate_payload = candidate["candidate"]
         displayed = [_display_payload_markdown(self.root, candidate_payload)]
-        if self.llm is None:
-            return InterfaceResult(
-                status=ApiStatus.FAILED.value,
-                summary="Candidate review requires LLM review assistance.",
-                api_calls=calls,
-                displayed_in_claude=displayed,
-                errors=[
-                    {
-                        "code": "missing_llm",
-                        "message": "candidate review assist must run before a review decision",
-                    }
-                ],
-                next_actions=["Configure an LLM client and rerun candidate review."],
-                extra={"candidate": candidate_payload},
-            )
-
-        assist = self.llm.complete(
-            purpose="candidate_review_assist",
-            context={"candidate": candidate_payload},
-            prompt=assemble_prompt(
-                system_prompt="candidate-review-assist",
-                user_input={"candidate_id": candidate_id, "decision": decision},
-                object_context={"candidate": candidate_payload},
-                output_schema="candidate_review_assist",
-                constraints=["read_only", "must_not_bypass_review_gate"],
-            ),
-        )
-        assist_error = _validate_llm_output("candidate_review_assist", assist)
-        if assist_error is not None:
-            return _invalid_llm_result(
-                calls,
-                [],
-                "Candidate review assist returned an invalid result.",
-                "candidate_review_assist",
-                assist_error,
-                displayed_in_claude=displayed,
-            )
+        assist = _candidate_review_guidance(candidate_payload)
         review_draft = _review_payload(None, candidate_payload)
 
         if decision is None:
@@ -451,7 +410,7 @@ class SlashCommandInterface:
                     ],
                 )
             try:
-                target_knowledge = _knowledge_payload(self.root, merge_targets[0])
+                _knowledge_payload(self.root, merge_targets[0])
             except (OSError, ValueError) as exc:
                 return InterfaceResult(
                     status=ApiStatus.FAILED.value,
@@ -460,67 +419,26 @@ class SlashCommandInterface:
                     displayed_in_claude=displayed,
                     errors=[{"code": "target_knowledge_not_found", "message": str(exc)}],
                 )
-            merge_assist = self.llm.complete(
-                purpose="knowledge_merge_assist",
-                context={
-                    "candidate": candidate_payload,
-                    "target_knowledge": target_knowledge,
-                },
-                prompt=assemble_prompt(
-                    system_prompt="knowledge-merge-assist",
-                    user_input={
-                        "candidate_id": candidate_id,
-                        "target_knowledge_id": merge_targets[0],
-                        "reason": reason,
-                    },
-                    object_context={
-                        "candidate": candidate_payload,
-                        "target_knowledge": target_knowledge,
-                        "include_object_body": True,
-                    },
-                    output_schema="knowledge_merge_assist",
-                    constraints=["proposal_only", "final_payload_must_be_user_reviewed"],
-                ),
-            )
-            merge_error = _validate_llm_output("knowledge_merge_assist", merge_assist)
-            if merge_error is not None:
-                return _invalid_llm_result(
-                    calls,
-                    [],
-                    "Knowledge merge assist returned an invalid result.",
-                    "knowledge_merge_assist",
-                    merge_error,
-                    displayed_in_claude=displayed,
-                )
             if reviewed_markdown is None:
                 return InterfaceResult(
                     status=ApiStatus.NEEDS_REVIEW.value,
-                    summary="Merge review is waiting for user input in Claude Code.",
+                    summary="Merge review requires user-reviewed merge content.",
                     api_calls=calls,
                     displayed_in_claude=displayed,
                     requested_in_claude=[
                         _claude_request(
                             "reviewed_markdown",
                             "merge_candidate",
-                            "Reply with approve to use the merge draft, or provide reviewed "
-                            "Markdown frontmatter and body.",
+                            "Provide reviewed merge Markdown frontmatter and body.",
                         )
                     ],
                     next_actions=[
-                        "Review the merge draft in Claude Code and reply with approve "
-                        "or edited Markdown."
+                        "Provide reviewed summary, content, evidence, and bindto for the merge."
                     ],
                     extra={
                         "candidate": candidate_payload,
                         "review_assist": assist,
-                        "merge_assist": merge_assist,
-                        "review_draft": {
-                            **review_draft,
-                            "summary": merge_assist["merged_summary"],
-                            "content": merge_assist["merged_content"],
-                            "evidence": merge_assist["evidence"],
-                            "bindto": merge_assist["bindto"],
-                        },
+                        "review_draft": review_draft,
                     },
                 )
             reviewed = _review_payload(reviewed_markdown, candidate_payload)
@@ -555,7 +473,6 @@ class SlashCommandInterface:
                 "candidate": candidate_payload,
                 "review_assist": assist,
                 "review_draft": review_draft,
-                **({"merge_assist": merge_assist} if decision == "merge" else {}),
             },
         )
 
@@ -570,28 +487,52 @@ class SlashCommandInterface:
         approve: bool = False,
     ) -> InterfaceResult:
         calls: list[ApiCallRecord] = []
-        if init_llm_result is None:
-            llm_request = _knowledgebase_create_llm_request(self.root, title, input_path)
-            init_llm_result = self._complete_llm(
-                "knowledgebase_create",
-                llm_request,
-                {"title": title, "input_path": str(input_path)},
-            )
-        reviewed = _knowledgebase_review_payload(reviewed_markdown, init_llm_result)
-        review = {"decision": "approve"} if approve else None
         create_result = self._call(
             calls,
             "kb.knowledgebase.create",
             title=title,
+            input_path=input_path,
             knowledgebase_id=knowledgebase_id,
-            description=reviewed.get("description"),
-            tags=reviewed.get("tags", []),
-            scope=reviewed.get("scope"),
-            default_outline_id=reviewed.get("default_outline_id"),
-            outlines=reviewed.get("outlines"),
-            review=review,
         )
+        if create_result["status"] == ApiStatus.NEEDS_LLM.value:
+            llm_result = init_llm_result or self._complete_llm(
+                "knowledgebase_create",
+                create_result.get("llm_request"),
+                {"title": title, "input_path": str(input_path)},
+            )
+            create_result = self._call(
+                calls,
+                "kb.knowledgebase.create",
+                title=title,
+                input_path=input_path,
+                knowledgebase_id=knowledgebase_id,
+                resume_token=create_result["resume"]["token"],
+                llm_result=llm_result,
+            )
         if create_result["status"] == ApiStatus.NEEDS_REVIEW.value:
+            draft = create_result.get("reviewed_payload") or create_result.get(
+                "knowledgebase_draft", {}
+            )
+            reviewed = _knowledgebase_review_payload(reviewed_markdown, draft)
+            if approve:
+                create_result = self._call(
+                    calls,
+                    "kb.knowledgebase.create",
+                    title=title,
+                    knowledgebase_id=knowledgebase_id,
+                    description=reviewed.get("description"),
+                    tags=reviewed.get("tags", []),
+                    scope=reviewed.get("scope"),
+                    default_outline_id=reviewed.get("default_outline_id"),
+                    outlines=reviewed.get("outlines"),
+                    review={"decision": "approve"},
+                )
+                return self._from_api_result(
+                    create_result,
+                    calls,
+                    "Created knowledgebase.",
+                    extra={"draft": reviewed},
+                )
             return InterfaceResult(
                 status=ApiStatus.NEEDS_REVIEW.value,
                 summary="Knowledgebase draft is waiting for user input in Claude Code.",
@@ -611,7 +552,6 @@ class SlashCommandInterface:
             create_result,
             calls,
             "Created knowledgebase.",
-            extra={"draft": reviewed},
         )
 
     def kb_knowledgebase_list(self, knowledgebase_id: str | None = None) -> InterfaceResult:
@@ -871,115 +811,6 @@ def _knowledge_payload(root: Path, knowledge_id: str) -> dict[str, Any]:
     }
 
 
-def _knowledgebase_create_llm_request(
-    root: Path,
-    title: str,
-    input_path: str | Path,
-) -> dict[str, Any]:
-    input_context = _knowledgebase_input_context(root, input_path)
-    constraints = [
-        "draft_only",
-        "human_review_required",
-        "must_not_create_source_or_candidate",
-        "preserve_meaningful_outline_hierarchy",
-    ]
-    prompt = assemble_prompt(
-        system_prompt="knowledgebase-create",
-        user_input={"title": title, "input_path": str(input_path)},
-        object_context={
-            "knowledgebase_create_input": input_context,
-            "include_object_body": True,
-        },
-        output_schema="knowledgebase_create_draft",
-        constraints=constraints,
-    )
-    return {
-        "id": "llm-knowledgebase-create",
-        "purpose": "knowledgebase_create",
-        "system_prompt": prompt["system_prompt"],
-        "prompt_version": prompt["prompt_version"],
-        "required_context": ["knowledgebase_create_input"],
-        "output_schema": "knowledgebase_create_draft",
-        "output_schema_definition": schema_for_output("knowledgebase_create_draft"),
-        "constraints": constraints,
-        "prompt": prompt,
-    }
-
-
-def _knowledgebase_input_context(root: Path, input_path: str | Path) -> dict[str, Any]:
-    input_text = str(input_path)
-    if _is_url(input_text):
-        return {
-            "input_path": input_text,
-            "input_kind": "url",
-            "content": _download_text_context(input_text),
-        }
-
-    resolved = _resolve_interface_input(root, input_path)
-    if resolved.is_file():
-        return {
-            "input_path": input_text,
-            "input_kind": "file",
-            "resolved_path": str(resolved),
-            "content": resolved.read_text(encoding="utf-8"),
-        }
-    if resolved.is_dir():
-        documents = []
-        for path in sorted(resolved.rglob("*")):
-            if path.is_file() and path.suffix.lower() in {".md", ".txt", ".yaml", ".yml"}:
-                documents.append(
-                    {
-                        "path": str(path),
-                        "content": path.read_text(encoding="utf-8"),
-                    }
-                )
-        return {
-            "input_path": input_text,
-            "input_kind": "directory",
-            "resolved_path": str(resolved),
-            "documents": documents,
-        }
-    return {
-        "input_path": input_text,
-        "input_kind": "missing",
-        "content": "",
-        "warning": "Input path was not readable when assembling the LLM request.",
-    }
-
-
-def _resolve_interface_input(root: Path, input_path: str | Path) -> Path:
-    path = Path(input_path).expanduser()
-    if path.is_absolute():
-        return path.resolve()
-    workspace_path = (root / path).resolve()
-    if workspace_path.exists():
-        return workspace_path
-    return path.resolve()
-
-
-def _is_url(value: str) -> bool:
-    parsed = urlparse(value)
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
-
-
-def _download_text_context(url: str) -> str:
-    request = Request(url, headers={"User-Agent": "KBManager/0.1"})
-    with urlopen(request, timeout=20) as response:
-        raw = response.read(MAX_KNOWLEDGEBASE_INPUT_BYTES + 1)
-        if len(raw) > MAX_KNOWLEDGEBASE_INPUT_BYTES:
-            raise ValueError(
-                f"knowledgebase create input exceeds {MAX_KNOWLEDGEBASE_INPUT_BYTES} bytes: {url}"
-            )
-        charset = response.headers.get_content_charset() or "utf-8"
-        content_type = response.headers.get_content_type()
-    text = raw.decode(charset, errors="replace")
-    if content_type in {"text/html", "application/xhtml+xml"}:
-        return text
-    if content_type.startswith("text/"):
-        return f"<!doctype html>\n<html>\n<body>\n<pre>{escape(text)}</pre>\n</body>\n</html>\n"
-    raise ValueError(f"unsupported knowledgebase create URL content type: {content_type}")
-
-
 def _claude_request(kind: str, action: str, instructions: str) -> dict[str, str]:
     return {
         "kind": kind,
@@ -1012,6 +843,20 @@ def _review_payload(
     }
 
 
+def _candidate_review_guidance(candidate: dict[str, Any]) -> dict[str, Any]:
+    frontmatter = dict(candidate.get("frontmatter", {}))
+    return {
+        "summary": frontmatter.get("summary", ""),
+        "evidence_review": frontmatter.get("evidence", []),
+        "bindto": frontmatter.get("bindto", []),
+        "outline_change_suggestions": frontmatter.get("outline_change_suggestions", []),
+        "recommendations": [
+            "Human reviewer must choose accept, reject, defer, or merge.",
+            "Review assistance is read-only and is not user approval.",
+        ],
+    }
+
+
 def _validate_llm_output(schema_name: str, result: Any) -> str | None:
     if not isinstance(result, dict):
         return "LLM result must be a mapping."
@@ -1021,47 +866,6 @@ def _validate_llm_output(schema_name: str, result: Any) -> str | None:
         for field in required:
             if field not in result:
                 return f"LLM result is missing required field: {field}"
-    if schema_name == "knowledge_merge_assist":
-        if (
-            not isinstance(result.get("merged_summary"), str)
-            or not result["merged_summary"].strip()
-        ):
-            return "knowledge_merge_assist.merged_summary must be a non-empty string"
-        if (
-            not isinstance(result.get("merged_content"), str)
-            or not result["merged_content"].strip()
-        ):
-            return "knowledge_merge_assist.merged_content must be a non-empty string"
-        if not _is_mapping_list(result.get("evidence")):
-            return "knowledge_merge_assist.evidence must be a list of mappings"
-        if not _is_mapping_list(result.get("bindto")):
-            return "knowledge_merge_assist.bindto must be a list of mappings"
-        if not isinstance(result.get("evidence_review"), list):
-            return "knowledge_merge_assist.evidence_review must be a list"
-    if schema_name == "candidate_review_assist":
-        if not isinstance(result.get("summary"), str) or not result["summary"].strip():
-            return "candidate_review_assist.summary must be a non-empty string"
-        if not isinstance(result.get("evidence_review"), list):
-            return "candidate_review_assist.evidence_review must be a list"
-        if not _is_mapping_list(result.get("bindto")):
-            return "candidate_review_assist.bindto must be a list of mappings"
-        if not isinstance(result.get("recommendations"), list):
-            return "candidate_review_assist.recommendations must be a list"
-    if schema_name == "source_ingest_prompt_rewrite":
-        if (
-            not isinstance(result.get("rewritten_prompt"), str)
-            or not result["rewritten_prompt"].strip()
-        ):
-            return "source_ingest_prompt_rewrite.rewritten_prompt must be a non-empty string"
-        if (
-            not isinstance(result.get("intent_summary"), str)
-            or not result["intent_summary"].strip()
-        ):
-            return "source_ingest_prompt_rewrite.intent_summary must be a non-empty string"
-        if not _is_string_list(result.get("constraints")):
-            return "source_ingest_prompt_rewrite.constraints must be a list of strings"
-        if not _is_string_list(result.get("warnings")):
-            return "source_ingest_prompt_rewrite.warnings must be a list of strings"
     if schema_name == "knowledgebase_create_draft":
         frontmatter = result.get("frontmatter")
         if not isinstance(frontmatter, dict):
@@ -1133,27 +937,25 @@ def _source_ingest_prompt_draft(
     user_prompt: str,
     llm: LlmClient | None,
 ) -> dict[str, Any]:
-    if llm is None:
-        raise ValueError("LLM client is required to rewrite source ingest prompt")
-    result = llm.complete(
-        purpose="source_ingest_prompt_rewrite",
-        context={"user_prompt": user_prompt},
-        prompt=assemble_prompt(
-            system_prompt="source-ingest-prompt-rewrite",
-            user_input={"user_prompt": user_prompt},
-            object_context={},
-            output_schema="source_ingest_prompt_rewrite",
-            constraints=[
-                "rewrite_only",
-                "requires_user_approval",
-                "must_not_override_kbmanager_system_prompt",
-            ],
-        ),
-    )
-    error = _validate_llm_output("source_ingest_prompt_rewrite", result)
-    if error is not None:
-        raise ValueError(error)
-    return result
+    prompt = user_prompt.strip()
+    if not prompt:
+        raise ValueError("source ingest prompt must be non-empty")
+    warnings = []
+    lowered = prompt.casefold()
+    unsafe_markers = ("ignore system", "bypass", "fabricate", "make up", "skip review")
+    if any(marker in lowered for marker in unsafe_markers):
+        warnings.append(
+            "Prompt may conflict with KBManager boundaries; source ingest rules "
+            "remain authoritative."
+        )
+    return {
+        "rewritten_prompt": prompt,
+        "intent_summary": "Use the confirmed temporary source-ingest guidance.",
+        "constraints": [
+            "Must not override KBManager system prompt, schema, evidence, or review rules."
+        ],
+        "warnings": warnings,
+    }
 
 
 def _confirmed_source_ingest_prompt(
@@ -1210,10 +1012,6 @@ def _source_ingest_input_path(
 
 def _is_string_list(value: Any) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
-
-
-def _is_mapping_list(value: Any) -> bool:
-    return isinstance(value, list) and all(isinstance(item, dict) for item in value)
 
 
 _APPLICATION_OPERATIONS = {

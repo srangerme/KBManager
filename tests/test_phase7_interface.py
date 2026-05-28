@@ -145,12 +145,11 @@ def test_interface_logs_llm_input_and_output(tmp_path: Path) -> None:
 
 def test_candidate_review_waits_for_decision_after_assist() -> None:
     api = MockApi({"kb.candidate.get": [_success("kb.candidate.get", candidate=_candidate())]})
-    llm = MockLlm({"candidate_review_assist": _review_assist()})
 
-    result = SlashCommandInterface(api=api, llm=llm).kb_candidate_review("knowledge-1")
+    result = SlashCommandInterface(api=api).kb_candidate_review("knowledge-1")
 
     assert result.to_dict()["status"] == "needs_review"
-    assert llm.calls[0]["purpose"] == "candidate_review_assist"
+    assert result.to_dict()["review_assist"]["summary"] == "Candidate summary."
 
 
 def test_candidate_accept_passes_new_review_payload() -> None:
@@ -160,9 +159,8 @@ def test_candidate_accept_passes_new_review_payload() -> None:
             "kb.knowledge.accept": [_success("kb.knowledge.accept")],
         }
     )
-    llm = MockLlm({"candidate_review_assist": _review_assist()})
 
-    result = SlashCommandInterface(api=api, llm=llm).kb_candidate_review(
+    result = SlashCommandInterface(api=api).kb_candidate_review(
         "knowledge-1",
         decision="accept",
         reviewed_markdown={
@@ -182,7 +180,7 @@ def test_candidate_accept_passes_new_review_payload() -> None:
     assert kwargs["bindto"][0]["node_id"] == "sec1"
 
 
-def test_candidate_merge_uses_merge_assist_and_reviewed_payload(tmp_path: Path) -> None:
+def test_candidate_merge_uses_reviewed_payload_without_merge_assist(tmp_path: Path) -> None:
     (tmp_path / "knowledge/atomic").mkdir(parents=True)
     (tmp_path / "knowledge/atomic/knowledge-target.md").write_text(
         "---\n"
@@ -206,11 +204,8 @@ def test_candidate_merge_uses_merge_assist_and_reviewed_payload(tmp_path: Path) 
             "kb.knowledge.merge": [_success("kb.knowledge.merge")],
         }
     )
-    llm = MockLlm(
-        {"candidate_review_assist": _review_assist(), "knowledge_merge_assist": _merge_assist()}
-    )
 
-    result = SlashCommandInterface(root=tmp_path, api=api, llm=llm).kb_candidate_review(
+    result = SlashCommandInterface(root=tmp_path, api=api).kb_candidate_review(
         "knowledge-1",
         decision="merge",
         merge_targets=["knowledge-target"],
@@ -219,7 +214,6 @@ def test_candidate_merge_uses_merge_assist_and_reviewed_payload(tmp_path: Path) 
 
     assert result.to_dict()["status"] == "success"
     assert api.calls[-1][0] == "kb.knowledge.merge"
-    assert llm.calls[1]["context"]["target_knowledge"]["body"] == "\nTarget body.\n"
 
 
 def test_knowledgebase_create_orchestrates_single_create_review(tmp_path: Path) -> None:
@@ -227,7 +221,26 @@ def test_knowledgebase_create_orchestrates_single_create_review(tmp_path: Path) 
     api = MockApi(
         {
             "kb.knowledgebase.create": [
-                _api_result("needs_review", "kb.knowledgebase.create")
+                _needs_llm("kb.knowledgebase.create", "kb-token"),
+                _api_result(
+                    "needs_review",
+                    "kb.knowledgebase.create",
+                    reviewed_payload={
+                        "description": "d",
+                        "tags": [],
+                        "scope": {"includes": ["i"], "excludes": []},
+                        "default_outline_id": "canonical",
+                        "outlines": [
+                            {
+                                "id": "canonical",
+                                "title": "Main",
+                                "description": "Main outline.",
+                                "status": "active",
+                                "nodes": [],
+                            }
+                        ],
+                    },
+                ),
             ],
         }
     )
@@ -257,10 +270,11 @@ def test_knowledgebase_create_orchestrates_single_create_review(tmp_path: Path) 
     )
 
     assert result.to_dict()["status"] == "needs_review"
-    assert [call[0] for call in api.calls] == ["kb.knowledgebase.create"]
-    assert llm.calls[0]["prompt"]["system_prompt"] == "knowledgebase-create"
-    input_context = llm.calls[0]["prompt"]["sections"][2]["content"]["knowledgebase_create_input"]
-    assert "Topic A" in input_context["content"]
+    assert [call[0] for call in api.calls] == [
+        "kb.knowledgebase.create",
+        "kb.knowledgebase.create",
+    ]
+    assert llm.calls[0]["llm_request"]["purpose"] == "kb.knowledgebase.create"
 
 
 def test_read_only_list_commands_display_markdown(tmp_path: Path) -> None:

@@ -156,12 +156,9 @@ KBManager 本体不保存用户数据。用户侧不提供提示词文件，API 
 系统提示词类型：
 
 - `source-ingest.md`
-- `source-ingest-prompt-rewrite.md`
 - `candidate-create.md`
 - `note-title.md`
 - `clean-migration-plan.md`
-- `candidate-review-assist.md`
-- `knowledge-merge-assist.md`
 - `knowledgebase-create.md`
 
 Claude Code 的组装顺序：
@@ -358,11 +355,11 @@ candidates:
 
 ### `kb.knowledgebase.create`
 
-- 输入：`title`、经用户 review 确认后的 `description`、`tags`、`scope`、`default_outline_id`、`outlines`，必选 `entrypoint` 和 `dry_run`，可选 `knowledgebase_id`。
-- 读取：knowledgebase 模板、已有 knowledgebase 摘要。
+- 输入：初始 draft 阶段接收 `title` 和临时 `input_path`；resume 阶段接收同一 `input_path`、`resume_token` 和 `llm_result`；最终写入阶段接收 `title`、经用户 review 确认后的 `description`、`tags`、`scope`、`default_outline_id`、`outlines` 和 `review.decision: approve`。必选 `entrypoint` 和 `dry_run`，可选 `knowledgebase_id`。
+- 读取：初始阶段读取临时 source-like context、knowledgebase 模板和已有 knowledgebase 摘要。
 - 写入：active knowledgebase Markdown，以及同名 outlines YAML 文件。knowledgebase frontmatter 包含 `id`、`type: knowledge-base`、`title`、`status: active`、`description`、`tags`、`scope`、`default_outline_id`、`outlines_file`、`outlines` manifest、review 字段、`created` 和 `updated`；完整 outline 树写入 `outlines_file` 指向的 YAML 文件。成功写入后 API 自动调用 `kb.index.rebuild` 重建派生索引。
-- LLM 辅助：API 本身不返回 `needs_llm`。knowledgebase create workflow 的 source-like input 由 Interface 临时读取或采集，并使用 `knowledgebase-create.md` 系统提示词生成草案；用户确认后，Interface 将 reviewed payload 交给本 API。
-- Review gate：需要。缺少 `review.decision: approve` 时返回 `needs_review`，不得写入。
+- LLM 辅助：需要。缺少 reviewed payload 且提供 `input_path` 时，API 返回 `needs_llm`，使用 `knowledgebase-create.md` 生成 draft；resume 后 API 校验 draft 并返回 `needs_review`。
+- Review gate：需要。缺少 `review.decision: approve` 时返回 `needs_review`，不得写入。LLM draft 不是用户批准。
 - 校验：`title` 和 `description` 必须是非空字符串；`tags` 必须是字符串列表；`scope` 必须明确包含和排除范围；显式 `knowledgebase_id` 必须形如 `kb-YYYYMMDD-001` 或 `kb-YYYYMMDD-001-title-slug` 且全局唯一；标题不能与已有 knowledge-base 重复；`default_outline_id` 必须指向一个 active outline；每个 outline 和可绑定 node 必须有稳定 ID。
 - 输出：knowledgebase ID、Markdown 路径、outlines YAML 路径和自动索引重建结果。
 - 约束：本 API 不创建 source 对象，不写入 `data/raw` 或 `data/cleaned`，不提供 knowledgebase add/remove 成员维护能力；knowledgebase 成员关系只由 knowledge `bindto` 表达。

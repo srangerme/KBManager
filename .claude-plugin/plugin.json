@@ -1,7 +1,7 @@
 {
   "name": "kbm",
   "displayName": "KBManager",
-  "version": "2.0.8",
+  "version": "2.0.11",
   "description": "File-based personal AI knowledge manager commands for Claude Code.",
   "author": {
     "name": "KBManager"

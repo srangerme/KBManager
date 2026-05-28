@@ -59,6 +59,55 @@ def test_knowledgebase_create_requires_review_then_writes_active_kb_and_outlines
     assert "sec1" in outlines_file.read_text(encoding="utf-8")
 
 
+def test_knowledgebase_create_llm_draft_then_review_gate(tmp_path: Path) -> None:
+    init_workspace(tmp_path, entrypoint="claude_code", dry_run=False)
+    (tmp_path / "kb-seed.md").write_text("# Seed\n\n- Topic A\n", encoding="utf-8")
+
+    first = knowledgebase_create(
+        tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
+        title="Research KB",
+        input_path="kb-seed.md",
+    ).to_dict()
+    resumed = knowledgebase_create(
+        tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
+        title="Research KB",
+        input_path="kb-seed.md",
+        resume_token=first["resume"]["token"],
+        llm_result={"frontmatter": _kb_payload(), "body": "Draft body."},
+    ).to_dict()
+
+    assert first["status"] == "needs_llm"
+    assert first["llm_request"]["system_prompt"] == "knowledgebase-create"
+    assert first["llm_request"]["output_schema"] == "knowledgebase_create_draft"
+    user_input = first["llm_request"]["prompt"]["sections"][1]["content"]
+    assert "Topic A" in user_input["knowledgebase_create_input"]["content"]
+    assert not list((tmp_path / "knowledge/bases").glob("kb-*.md"))
+    assert resumed["status"] == "needs_review"
+    assert resumed["reviewed_payload"]["description"] == "Research knowledge."
+
+
+def test_knowledgebase_create_rejects_invalid_resume_token(tmp_path: Path) -> None:
+    init_workspace(tmp_path, entrypoint="claude_code", dry_run=False)
+    (tmp_path / "kb-seed.md").write_text("# Seed\n", encoding="utf-8")
+
+    result = knowledgebase_create(
+        tmp_path,
+        entrypoint="claude_code",
+        dry_run=False,
+        title="Research KB",
+        input_path="kb-seed.md",
+        resume_token="bad-token",
+        llm_result={"frontmatter": _kb_payload(), "body": "Draft body."},
+    ).to_dict()
+
+    assert result["status"] == "failed"
+    assert result["errors"][0]["code"] == "invalid_resume_token"
+
+
 def test_knowledgebase_create_rejects_duplicate_id_and_title(tmp_path: Path) -> None:
     init_workspace(tmp_path, entrypoint="claude_code", dry_run=False)
     first = knowledgebase_create(

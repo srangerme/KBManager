@@ -1102,6 +1102,7 @@ def knowledgebase_create(
     *,
     entrypoint: str | None = None,
     title: str,
+    input_path: str | Path | None = None,
     description: str | None = None,
     tags: list[str] | None = None,
     scope: dict[str, Any] | None = None,
@@ -1109,9 +1110,11 @@ def knowledgebase_create(
     outlines: list[dict[str, Any]] | None = None,
     review: dict[str, Any] | None = None,
     knowledgebase_id: str | None = None,
+    resume_token: str | None = None,
+    llm_result: dict[str, Any] | None = None,
     dry_run: bool | None = None,
 ) -> ApiResult:
-    """Create a reviewed active knowledge base and its outline YAML file."""
+    """Create a knowledge base through LLM draft, review, and approved write gates."""
 
     contract_error = _api_contract_error(
         KNOWLEDGEBASE_CREATE_OPERATION,
@@ -1121,9 +1124,6 @@ def knowledgebase_create(
     if contract_error is not None:
         return contract_error
 
-    if not _review_approved(review):
-        return _needs_review(KNOWLEDGEBASE_CREATE_OPERATION, ["approve", "revise", "reject"])
-
     try:
         workspace = Workspace(root)
         repository = ObjectRepository(workspace)
@@ -1132,6 +1132,88 @@ def knowledgebase_create(
             title=title,
             knowledgebase_id=knowledgebase_id,
         )
+
+        has_reviewed_payload = _has_knowledgebase_create_payload(
+            description=description,
+            scope=scope,
+            default_outline_id=default_outline_id,
+            outlines=outlines,
+        )
+
+        if resume_token is None and not has_reviewed_payload:
+            if input_path is None:
+                return _needs_review(
+                    KNOWLEDGEBASE_CREATE_OPERATION,
+                    ["approve", "revise", "reject"],
+                )
+            input_context = _knowledgebase_create_input_context(workspace, input_path)
+            token_payload = _knowledgebase_create_token_payload(
+                title=title,
+                input_path=input_path,
+                knowledgebase_id=knowledgebase_id,
+                input_context=input_context,
+            )
+            return _needs_llm(
+                KNOWLEDGEBASE_CREATE_OPERATION,
+                purpose="knowledgebase_create",
+                system_prompt="knowledgebase-create",
+                required_context=["knowledgebase_create_input"],
+                output_schema="knowledgebase_create_draft",
+                constraints=[
+                    "draft_only",
+                    "human_review_required",
+                    "must_not_create_source_or_candidate",
+                    "preserve_meaningful_outline_hierarchy",
+                ],
+                token_payload=token_payload,
+            )
+
+        if resume_token is not None:
+            if input_path is None:
+                raise RepositoryError("knowledgebase create resume requires input_path")
+            input_context = _knowledgebase_create_input_context(workspace, input_path)
+            token_payload = _knowledgebase_create_token_payload(
+                title=title,
+                input_path=input_path,
+                knowledgebase_id=knowledgebase_id,
+                input_context=input_context,
+            )
+            if resume_token != _resume_token(KNOWLEDGEBASE_CREATE_OPERATION, token_payload):
+                return _failed(
+                    KNOWLEDGEBASE_CREATE_OPERATION,
+                    "invalid_resume_token",
+                    "Resume token does not match this knowledgebase.create request.",
+                    "Restart kb.knowledgebase.create and use the returned resume token.",
+                )
+            payload = _validate_knowledgebase_create_payload(llm_result)
+            return _needs_review(
+                KNOWLEDGEBASE_CREATE_OPERATION,
+                ["approve", "revise", "reject"],
+                extra={
+                    "knowledgebase_draft": payload,
+                    "knowledgebase_create_input": input_context,
+                    "reviewed_payload": payload,
+                },
+            )
+
+        if not _review_approved(review):
+            reviewed_payload = None
+            if has_reviewed_payload:
+                reviewed_payload = _validate_knowledgebase_create_payload(
+                    {
+                        "description": description,
+                        "tags": tags or [],
+                        "scope": scope,
+                        "default_outline_id": default_outline_id,
+                        "outlines": outlines,
+                    }
+                )
+            return _needs_review(
+                KNOWLEDGEBASE_CREATE_OPERATION,
+                ["approve", "revise", "reject"],
+                extra=({"reviewed_payload": reviewed_payload} if reviewed_payload else None),
+            )
+
         payload = _validate_knowledgebase_create_payload(
             {
                 "description": description,
@@ -2626,12 +2708,18 @@ def _escape_table_cell(value: str) -> str:
     return value.replace("|", "\\|").replace("\n", " ")
 
 
-def _needs_review(operation: str, options: list[str]) -> ApiResult:
+def _needs_review(
+    operation: str,
+    options: list[str],
+    *,
+    extra: dict[str, Any] | None = None,
+) -> ApiResult:
     return ApiResult(
         status=ApiStatus.NEEDS_REVIEW,
         operation=operation,
         review=ReviewRequest(required=True, options=options),
         next_actions=["Provide a user review decision before retrying this operation."],
+        extra=extra or {},
     )
 
 
@@ -2921,6 +3009,85 @@ def _knowledgebase_body(description: str, scope: dict[str, Any], outlines: Any) 
         f"## Outlines\n\n```yaml\n{outlines_text}\n```\n\n"
         "## Derived Member View\n"
     )
+
+
+def _has_knowledgebase_create_payload(
+    *,
+    description: str | None,
+    scope: dict[str, Any] | None,
+    default_outline_id: str | None,
+    outlines: list[dict[str, Any]] | None,
+) -> bool:
+    return any(value is not None for value in (description, scope, default_outline_id, outlines))
+
+
+def _knowledgebase_create_token_payload(
+    *,
+    title: str,
+    input_path: str | Path,
+    knowledgebase_id: str | None,
+    input_context: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "title": title,
+        "input_path": str(input_path),
+        "knowledgebase_id": knowledgebase_id,
+        "knowledgebase_create_input": input_context,
+    }
+
+
+def _knowledgebase_create_input_context(
+    workspace: Workspace,
+    input_path: str | Path,
+) -> dict[str, Any]:
+    input_text = str(input_path)
+    if _is_supported_source_url(input_text):
+        return {
+            "input_path": input_text,
+            "input_kind": "url",
+            "content": _download_url_as_html(input_text),
+        }
+
+    resolved = _resolve_external_input(workspace.root, input_path)
+    if resolved.is_file():
+        return {
+            "input_path": input_text,
+            "input_kind": "file",
+            "resolved_path": str(resolved),
+            "content": resolved.read_text(encoding="utf-8"),
+        }
+    if resolved.is_dir():
+        documents = []
+        for path in sorted(resolved.rglob("*")):
+            if path.is_file() and path.suffix.lower() in {".md", ".txt", ".yaml", ".yml"}:
+                documents.append(
+                    {
+                        "path": str(path),
+                        "content": path.read_text(encoding="utf-8"),
+                    }
+                )
+        return {
+            "input_path": input_text,
+            "input_kind": "directory",
+            "resolved_path": str(resolved),
+            "documents": documents,
+        }
+    return {
+        "input_path": input_text,
+        "input_kind": "missing",
+        "content": "",
+        "warning": "Input path was not readable when assembling the LLM request.",
+    }
+
+
+def _resolve_external_input(root: Path, input_path: str | Path) -> Path:
+    path = Path(input_path).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    workspace_path = (root / path).resolve()
+    if workspace_path.exists():
+        return workspace_path
+    return path.resolve()
 
 
 def _validate_knowledgebase_create_payload(payload: dict[str, Any] | None) -> dict[str, Any]:

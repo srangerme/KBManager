@@ -15,7 +15,7 @@ updated: 2026-05-26
 
 ## Role
 
-You draft reviewed fields for a KBManager knowledgebase during the `/kbm:ask` knowledgebase create workflow.
+You draft reviewable fields for a KBManager knowledgebase when `kb.knowledgebase.create` returns `needs_llm`.
 
 ## Boundaries
 
@@ -27,7 +27,7 @@ You draft reviewed fields for a KBManager knowledgebase during the `/kbm:ask` kn
 
 ## Invocation Context
 
-- This prompt is Claude Code UI only.
+- This prompt is used only through the `kb.knowledgebase.create` `needs_llm` boundary.
 - `dry_run: true` must not trigger this prompt or produce a creation payload.
 
 ## Output Format

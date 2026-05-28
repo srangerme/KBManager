@@ -22,7 +22,7 @@ def test_claude_plugin_exposes_only_ask_command() -> None:
     assert {path.name for path in COMMAND_DIR.glob("*.md")} == {"ask.md"}
 
     command = (COMMAND_DIR / "ask.md").read_text(encoding="utf-8")
-    assert "only KBManager\nslash command" in command
+    assert "唯一的 KBManager slash command" in command
     assert "scripts/kbmanager_plugin.py" in command
     assert "entrypoint" in command
     assert "dry_run" in command
@@ -32,15 +32,13 @@ def test_claude_plugin_packages_kbm_skills() -> None:
     skill_names = {path.name for path in (REPO_ROOT / "skills").iterdir() if path.is_dir()}
 
     assert skill_names == {
-        "kbm-api-ui",
-        "kbm-basic",
         "kbm-candidate",
-        "kbm-kb-outline",
         "kbm-kb",
         "kbm-maintenance",
         "kbm-note",
         "kbm-research-on",
         "kbm-source",
+        "kbm-usage",
     }
     for name in skill_names:
         text = (REPO_ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
@@ -55,17 +53,17 @@ def test_knowledgebase_workflow_does_not_ingest_source_context() -> None:
     source_skill = (REPO_ROOT / "skills/kbm-source/SKILL.md").read_text(
         encoding="utf-8"
     )
-    api_catalog = (
-        REPO_ROOT / "skills/kbm-api-ui/references/api-ui-catalog.md"
-    ).read_text(encoding="utf-8")
+    api_catalog = (REPO_ROOT / "skills/kbm-usage/SKILL.md").read_text(
+        encoding="utf-8"
+    )
     command = (COMMAND_DIR / "ask.md").read_text(encoding="utf-8")
 
     for text in (knowledgebase_skill, source_skill, api_catalog, command):
         assert "kb.source.add" in text
     assert "不得调用 `kb.source.add`" in knowledgebase_skill
-    assert "不得调用\n`kb.candidate.create`" in knowledgebase_skill
-    assert "不使用本 source add workflow" in source_skill
-    assert "不创建 source" in api_catalog
+    assert "不得调用 `kb.candidate.create`" in knowledgebase_skill
+    assert "改用 kbm-kb 而不是 source lifecycle" in source_skill
+    assert "不创建 source/candidate" in api_catalog
     assert "不要调用 `kb.source.add`" in command
 
 
@@ -86,7 +84,7 @@ def test_register_marketplace_script_adds_current_plugin(tmp_path: Path) -> None
     assert plugin_root.is_dir()
     assert not plugin_root.is_symlink()
     assert (plugin_root / "commands/ask.md").is_file()
-    assert (plugin_root / "skills/kbm-basic/SKILL.md").is_file()
+    assert (plugin_root / "skills/kbm-usage/SKILL.md").is_file()
     assert (plugin_root / "scripts/kbmanager_plugin.py").is_file()
     assert (plugin_root / "src/kbmanager/application.py").is_file()
     assert (plugin_root / "system-prompts/source-ingest.md").is_file()

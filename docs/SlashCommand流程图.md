@@ -8,7 +8,7 @@ API 为止，不描述 API 内部读写细节。
 - `(user)`：用户输入、回复、选择或确认。
 - `(ask)`：`/kbm:ask` 编排。
 - `(skill)`：`kbm-*` skill 提供的流程、规则或 API 参考。
-- `(LLM)`：意图解析、`needs_llm` 输出生成、review assist 或结果整理。
+- `(LLM)`：意图解析、API `needs_llm` 输出生成或结果整理。
 - `(api)`：第二层 `kb.*` API 调用。
 
 ## 1. Claude Code UI 总流程
@@ -52,16 +52,18 @@ flowchart TD
 ```mermaid
 flowchart TD
   A["(user) source file/path/url"] --> B{"(ask) 是否带 user_prompt"}
-  B -- 是 --> C["(LLM) rewrite source ingest prompt"]
+  B -- 是 --> C["(ask) 按 source skill 规则整理 prompt fragment"]
   C --> D["(user) 确认或修改 prompt fragment"]
   D --> E["(api) kb.source.add"]
   B -- 否 --> E
-  E --> G["(LLM) source ingest needs_llm"]
+  E --> F{"(api) status"}
+  F -- needs_llm --> G["(LLM) 按 llm_request 生成 source ingest result"]
   G --> H["(api) resume kb.source.add"]
   H --> I["(api) kb.candidate.create"]
-  I --> J["(LLM) candidate create needs_llm"]
-  J --> K["(api) resume kb.candidate.create"]
-  K --> L["(ask) 展示 source/candidate ID、bindto 和 outline suggestions"]
+  I --> J{"(api) status"}
+  J -- needs_llm --> K["(LLM) 按 llm_request 生成 candidate drafts"]
+  K --> L["(api) resume kb.candidate.create"]
+  L --> M["(ask) 展示 source/candidate ID、bindto 和 outline suggestions"]
 ```
 
 ## 4. Review-Gated Workflows

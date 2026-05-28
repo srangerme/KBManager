@@ -146,7 +146,7 @@ def test_candidate_create_llm_request_includes_source_context(tmp_path: Path) ->
     assert source_context[0]["cleaned_path"].startswith("data/cleaned/")
 
 
-def test_interface_rejects_invalid_merge_assist_schema(tmp_path: Path) -> None:
+def test_candidate_merge_without_reviewed_payload_waits_for_user(tmp_path: Path) -> None:
     (tmp_path / "knowledge/atomic").mkdir(parents=True)
     (tmp_path / "knowledge/atomic/knowledge-2.md").write_text(
         "---\n"
@@ -188,22 +188,15 @@ def test_interface_rejects_invalid_merge_assist_schema(tmp_path: Path) -> None:
                 },
             }
 
-    class MockLlm:
-        def complete(self, **kwargs: object) -> dict[str, object]:
-            if kwargs["purpose"] == "candidate_review_assist":
-                return {"summary": "s", "evidence_review": [], "bindto": [], "recommendations": []}
-            return {"merged_body": "old"}
-
     result = (
-        SlashCommandInterface(root=tmp_path, api=MockApi(), llm=MockLlm())
+        SlashCommandInterface(root=tmp_path, api=MockApi())
         .kb_candidate_review(
             "knowledge-1",
             decision="merge",
             merge_targets=["knowledge-2"],
-            reviewed_markdown={"summary": "s", "content": "c", "evidence": [], "bindto": []},
         )
         .to_dict()
     )
 
-    assert result["status"] == "failed"
-    assert "merged_summary" in result["errors"][0]["message"]
+    assert result["status"] == "needs_review"
+    assert result["requested_in_claude"][0]["action"] == "merge_candidate"
