@@ -4,7 +4,7 @@
 `/kbm:ask`、`kbm-*` skills、自然语言交互、结果展示和 user review
 组成，负责把用户意图编排为第二层 `kb.*` API 调用。
 
-除 clean 迁移执行和 `kbm-kb-outline-workflows` 明确触发的 outline YAML 更新特许例外外，第一层不直接修改 Markdown/PDF/YAML 对象
+除 clean 迁移执行和 `kbm-kb-outline` 明确触发的 outline YAML 更新特许例外外，第一层不直接修改 Markdown/PDF/YAML 对象
 文件，不直接维护对象状态机。所有知识库数据变更必须通过第二层 API 完成。
 
 ## 1. 第一层职责
@@ -22,7 +22,7 @@
 
 第一层不得：
 
-- 绕过 API 直接创建、修改、移动、删除对象文件；clean 迁移执行和 `kbm-kb-outline-workflows` 的受控 outline YAML 更新除外。
+- 绕过 API 直接创建、修改、移动、删除对象文件；clean 迁移执行和 `kbm-kb-outline` 的受控 outline YAML 更新除外。
 - 绕过 user review 修改正式 knowledge。
 - 把索引文件当作事实来源。
 - 在 check 中自动修复对象文件。
@@ -61,12 +61,12 @@
 
 - `kbm-basic`：目录结构、对象边界、文件职责、通用规则、禁令和受控直接编辑例外。
 - `kbm-api-ui`：Claude Code UI 可调用的 `kb.*` API、参数、`dry_run`、review gate、`needs_llm` 和结果处理。
-- `kbm-source-workflows`：source add、source deprecate。
-- `kbm-candidate-workflows`：candidate create/get/next pending/review。
-- `kbm-note-workflows`：note add/get/list/view/deprecate。
-- `kbm-knowledgebase-workflows`：knowledgebase create/list/map。
-- `kbm-kb-outline-workflows`：outline create/set-default/archive，以及用户显式要求时的受控 outline YAML 更新。
-- `kbm-maintenance-workflows`：init、check、clean inspect 和 clean migration。
+- `kbm-source`：source add、source deprecate。
+- `kbm-candidate`：candidate create/get/next pending/review。
+- `kbm-note`：note add/get/list/view/deprecate。
+- `kbm-kb`：knowledgebase create/list/map。
+- `kbm-kb-outline`：outline create/set-default/archive，以及用户显式要求时的受控 outline YAML 更新。
+- `kbm-maintenance`：init、check、clean inspect 和 clean migration。
 - `kbm-research-on`：根据 knowledgebase 的 `description`、`scope` 和 outline 生成 Deep Research prompt。
 
 内嵌在流程里的 LLM 能力不称为 skill。它们是 `system-prompts/` internal prompt module，由 API `needs_llm` 或 `/kbm:ask` 工作流固定触发。

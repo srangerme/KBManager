@@ -34,18 +34,39 @@ def test_claude_plugin_packages_kbm_skills() -> None:
     assert skill_names == {
         "kbm-api-ui",
         "kbm-basic",
-        "kbm-candidate-workflows",
-        "kbm-kb-outline-workflows",
-        "kbm-knowledgebase-workflows",
-        "kbm-maintenance-workflows",
-        "kbm-note-workflows",
+        "kbm-candidate",
+        "kbm-kb-outline",
+        "kbm-kb",
+        "kbm-maintenance",
+        "kbm-note",
         "kbm-research-on",
-        "kbm-source-workflows",
+        "kbm-source",
     }
     for name in skill_names:
         text = (REPO_ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
         assert f"name: {name}" in text
         assert "description:" in text
+
+
+def test_knowledgebase_workflow_does_not_ingest_source_context() -> None:
+    knowledgebase_skill = (
+        REPO_ROOT / "skills/kbm-kb/SKILL.md"
+    ).read_text(encoding="utf-8")
+    source_skill = (REPO_ROOT / "skills/kbm-source/SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    api_catalog = (
+        REPO_ROOT / "skills/kbm-api-ui/references/api-ui-catalog.md"
+    ).read_text(encoding="utf-8")
+    command = (COMMAND_DIR / "ask.md").read_text(encoding="utf-8")
+
+    for text in (knowledgebase_skill, source_skill, api_catalog, command):
+        assert "kb.source.add" in text
+    assert "不得调用 `kb.source.add`" in knowledgebase_skill
+    assert "不得调用\n`kb.candidate.create`" in knowledgebase_skill
+    assert "不使用本 source add workflow" in source_skill
+    assert "不创建 source" in api_catalog
+    assert "不要调用 `kb.source.add`" in command
 
 
 def test_register_marketplace_script_adds_current_plugin(tmp_path: Path) -> None:

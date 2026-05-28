@@ -17,6 +17,7 @@ LEGACY_PLUGIN_NAMES = {"kbmanager"}
 PLUGIN_DIRS = (
     ".claude-plugin",
     "commands",
+    "docs",
     "scripts",
     "skills",
     "src",

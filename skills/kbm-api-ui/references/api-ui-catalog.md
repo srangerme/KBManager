@@ -1,23 +1,23 @@
-# KBManager UI API Catalog
+# KBManager UI API 目录
 
-Use this catalog for Claude Code UI calls.
+此目录用于 Claude Code UI 调用。
 
-## Global Payload Fields
+## 全局 Payload 字段
 
-Every `kb.*` API payload requires both fields:
+每个 `kb.*` API payload 都需要以下两个字段：
 
 ```yaml
 entrypoint: claude_code
 dry_run: false
 ```
 
-- `dry_run: true` validates payload shape, entrypoint permission, object
-  existence, state preconditions, and review gate requirements.
-- Dry run never writes object files, moves files, or resumes LLM output.
+- `dry_run: true` 会验证 payload shape、entrypoint permission、object existence、
+  state preconditions 和 review gate requirements。
+- Dry run 永远不会写入 object files、移动文件或 resume LLM output。
 
-## Review Gate Operations
+## 需要 Review Gate 的操作
 
-These operations require explicit Claude Code UI review:
+以下操作需要明确的 Claude Code UI review：
 
 - `kb.source.deprecate`
 - `kb.candidate.defer`
@@ -32,9 +32,9 @@ These operations require explicit Claude Code UI review:
 - `kb.note.deprecate`
 - clean migration execution after `kb.clean.inspect`
 
-## No Review Gate Operations
+## 不需要 Review Gate 的操作
 
-These operations do not require review gates:
+以下操作不需要 review gates：
 
 - `kb.init`
 - `kb.source.add`
@@ -48,32 +48,31 @@ These operations do not require review gates:
 - `kb.clean.inspect`
 - list/view read-only display workflows
 
-## Operations
+## 操作
 
-- `kb.init`: initialize workspace structure.
-- `kb.source.add`: add file, directory, or URL source; may return `needs_llm`.
-- `kb.candidate.create`: create pending candidates from source IDs; may return `needs_llm`; no review gate.
-- `kb.candidate.get`: read one candidate.
-- `kb.candidate.next_pending`: read next pending candidate.
-- `kb.candidate.defer`: review-gated candidate decision.
-- `kb.knowledge.accept`: review-gated candidate acceptance.
-- `kb.knowledge.reject`: review-gated candidate rejection.
-- `kb.knowledge.merge`: review-gated merge into existing knowledge.
-- `kb.knowledge.deprecate`: review-gated knowledge deprecation.
-- `kb.knowledgebase.create`: review-gated knowledgebase creation from reviewed content.
-- `kb.knowledgebase.outline.create`: review-gated outline creation.
-- `kb.knowledgebase.outline.set_default`: review-gated default outline update.
-- `kb.knowledgebase.outline.archive`: review-gated outline archival.
-- `kb.knowledgebase.map`: generate or return a knowledgebase map.
-- `kb.note.add`: add a note; may request LLM title generation.
-- `kb.note.get`: read one note.
-- `kb.note.deprecate`: review-gated note deprecation.
-- `kb.index.rebuild`: rebuild derived indexes and report consistency issues.
-- `kb.clean.inspect`: inspect layout/schema drift and optionally request an LLM
-  migration plan.
+- `kb.init`: 初始化 workspace structure。
+- `kb.source.add`: 添加 file、directory 或 URL source；可能返回 `needs_llm`。
+- `kb.candidate.create`: 从 source IDs 创建 pending candidates；可能返回 `needs_llm`；无 review gate。
+- `kb.candidate.get`: 读取一个 candidate。
+- `kb.candidate.next_pending`: 读取下一个 pending candidate。
+- `kb.candidate.defer`: 带 review gate 的 candidate decision。
+- `kb.knowledge.accept`: 带 review gate 的 candidate acceptance。
+- `kb.knowledge.reject`: 带 review gate 的 candidate rejection。
+- `kb.knowledge.merge`: 带 review gate 的 merge into existing knowledge。
+- `kb.knowledge.deprecate`: 带 review gate 的 knowledge deprecation。
+- `kb.knowledgebase.create`: 从 reviewed content 创建 knowledgebase，带 review gate；不创建 source，不写入 `data/raw` 或 `data/cleaned`，不创建 candidate。
+- `kb.knowledgebase.outline.create`: 创建 outline，带 review gate。
+- `kb.knowledgebase.outline.set_default`: 更新 default outline，带 review gate。
+- `kb.knowledgebase.outline.archive`: archive outline，带 review gate。
+- `kb.knowledgebase.map`: 生成或返回 knowledgebase map。
+- `kb.note.add`: 添加 note；可能请求 LLM title generation。
+- `kb.note.get`: 读取一个 note。
+- `kb.note.deprecate`: deprecate note，带 review gate。
+- `kb.index.rebuild`: 重建 derived indexes 并报告 consistency issues。
+- `kb.clean.inspect`: 检查 layout/schema drift，并可选择请求 LLM migration plan。
 
-## Result Handling
+## 结果处理
 
-Report `status`, `operation`, created/updated/deprecated objects, diffs, warnings,
-errors, review options, and next actions. Do not run an extra index rebuild after
-a write API that already reports automatic rebuild output.
+报告 `status`、`operation`、created/updated/deprecated objects、diffs、warnings、
+errors、review options 和 next actions。对于已经报告 automatic rebuild output 的写入 API，
+不要额外运行 index rebuild。

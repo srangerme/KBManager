@@ -45,12 +45,12 @@ All KBManager skills use the `kbm-` prefix:
 
 - `kbm-basic`: repository structure, object boundaries, file roles, global rules, and direct-edit exceptions.
 - `kbm-api-ui`: Claude Code UI-callable APIs, parameters, flowcharts, review gates, and `dry_run`.
-- `kbm-source-workflows`: source add and source deprecate workflows.
-- `kbm-candidate-workflows`: candidate create, get, next pending, and review workflows.
-- `kbm-note-workflows`: note add, get, list, view, and deprecate workflows.
-- `kbm-knowledgebase-workflows`: knowledgebase create, list, and map workflows.
-- `kbm-kb-outline-workflows`: outline create, set-default, archive, and explicit controlled outline YAML update workflows.
-- `kbm-maintenance-workflows`: init, check, clean inspect, and clean migration workflows.
+- `kbm-source`: source add and source deprecate workflows.
+- `kbm-candidate`: candidate create, get, next pending, and review workflows.
+- `kbm-note`: note add, get, list, view, and deprecate workflows.
+- `kbm-kb`: knowledgebase create, list, and map workflows.
+- `kbm-kb-outline`: outline create, set-default, archive, and explicit controlled outline YAML update workflows.
+- `kbm-maintenance`: init, check, clean inspect, and clean migration workflows.
 - `kbm-research-on`: generate a Deep Research prompt from a knowledgebase.
 
 Internal LLM steps such as source ingest, candidate creation, review assistance,

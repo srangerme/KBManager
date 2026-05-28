@@ -1,56 +1,56 @@
 ---
 name: kbm-api-ui
-description: Use this skill whenever Claude Code needs to call, validate, dry-run, resume, or explain KBManager kb.* APIs through scripts/kbmanager_plugin.py. Trigger on API payload construction, entrypoint="claude_code", dry_run requirements, needs_llm handling, needs_review gates, review-gated operations, result status handling, operation IDs, warnings/errors, or questions about which KBManager APIs are callable from Claude Code UI. Combine this with the relevant workflow skill before invoking kb.* operations.
+description: 当 Claude Code 需要通过 scripts/kbmanager_plugin.py 调用、校验、dry-run、resume 或解释 KBManager kb.* APIs 时使用此 skill。适用于 API payload 构造、entrypoint="claude_code"、dry_run 要求、needs_llm 处理、needs_review gates、带 review gate 的操作、result status 处理、operation IDs、warnings/errors，或关于哪些 KBManager APIs 可从 Claude Code UI 调用的问题。调用 kb.* 操作前，应与相关工作流 skill 配合使用。
 ---
 
 # KBManager API UI
 
-When this skill is used, explicitly tell the user: `Using skill: kbm-api-ui`.
+使用此 skill 时，必须明确告诉用户：`Using skill: kbm-api-ui`。
 
-Use this skill before invoking `scripts/kbmanager_plugin.py` from Claude Code UI
-or documenting UI-callable KBManager operations.
+从 Claude Code UI 调用 `scripts/kbmanager_plugin.py` 前，或记录 UI 可调用的
+KBManager 操作时，使用此 skill。
 
-## Helper Contract
+## 辅助脚本契约
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" <kb.operation> '<payload-json>' --pretty
 ```
 
-- Payloads are JSON objects.
-- Results are JSON objects produced by the internal API result model.
-- Every payload must include `entrypoint: "claude_code"`.
-- Every payload must include `dry_run`. Use `dry_run: true` when validating
-  without writes, moves, or LLM resume.
-- If an API returns `needs_llm`, use its `llm_request`, match its schema, and
-  resume the same operation with the returned token.
-- If an API returns `needs_review`, pause in Claude Code UI until the user
-  approves, edits, or rejects the proposed action.
+- Payload 是 JSON object。
+- Result 是内部 API result model 产生的 JSON object。
+- 每个 payload 必须包含 `entrypoint: "claude_code"`。
+- 每个 payload 必须包含 `dry_run`。在不执行写入、移动或 LLM resume 的情况下验证时，
+  使用 `dry_run: true`。
+- 如果 API 返回 `needs_llm`，使用其 `llm_request`，匹配其 schema，并用返回的 token
+  恢复同一操作。
+- 如果 API 返回 `needs_review`，在 Claude Code UI 中暂停，直到用户 approve、edit
+  或 reject proposed action。
 
-## UI Capability Boundary
+## UI 能力边界
 
-Claude Code UI may call all documented `kb.*` operations when their parameters,
-review gates, and dry-run behavior are respected.
+只要遵守参数、review gates 和 dry-run 行为，Claude Code UI 可以调用所有已文档化的
+`kb.*` 操作。
 
-## Flow
+## 流程
 
 ```mermaid
 flowchart TD
-  A["Claude Code UI request"] --> B["Select workflow skill"]
-  B --> C["Build JSON payload with entrypoint=claude_code"]
+  A["Claude Code UI 请求"] --> B["选择工作流 skill"]
+  B --> C["构造包含 entrypoint=claude_code 的 JSON payload"]
   C --> D{"dry_run?"}
-  D -- yes --> E["Validate only and report plan/errors"]
-  D -- no --> F["Call kb.* helper"]
+  D -- yes --> E["仅验证并报告 plan/errors"]
+  D -- no --> F["调用 kb.* helper"]
   F --> G{"API status"}
-  G -- needs_llm --> H["Generate schema-matching llm_result"]
-  H --> I["Resume same operation"]
+  G -- needs_llm --> H["生成匹配 schema 的 llm_result"]
+  H --> I["恢复同一操作"]
   I --> G
-  G -- needs_review --> J["Ask user in Claude Code UI"]
-  J --> K["Call approved review-gated operation"]
+  G -- needs_review --> J["在 Claude Code UI 中询问用户"]
+  J --> K["调用已批准的 review-gated operation"]
   K --> G
-  G -- success/failed/partial --> L["Report IDs, warnings, errors, next actions"]
+  G -- success/failed/partial --> L["报告 IDs、warnings、errors、next actions"]
 ```
 
-## References
+## 参考
 
 - `references/api-ui-catalog.md`
 - `references/api-ui-flowcharts.md`

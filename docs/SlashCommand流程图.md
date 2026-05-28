@@ -40,12 +40,12 @@ flowchart TD
 
 | 旧流程 | 当前承载 |
 | --- | --- |
-| source add / source deprecate | `kbm-source-workflows` |
-| candidate review | `kbm-candidate-workflows` |
-| note add / note deprecate / note list / note view | `kbm-note-workflows` |
-| knowledgebase create / knowledgebase list / knowledgebase map | `kbm-knowledgebase-workflows` |
-| knowledgebase outline create / set-default / archive | `kbm-kb-outline-workflows` |
-| init / check / clean | `kbm-maintenance-workflows` |
+| source add / source deprecate | `kbm-source` |
+| candidate review | `kbm-candidate` |
+| note add / note deprecate / note list / note view | `kbm-note` |
+| knowledgebase create / knowledgebase list / knowledgebase map | `kbm-kb` |
+| knowledgebase outline create / set-default / archive | `kbm-kb-outline` |
+| init / check / clean | `kbm-maintenance` |
 
 ## 3. Source Add
 
