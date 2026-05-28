@@ -15,7 +15,6 @@ MARKETPLACE_NAME = "sranger-marketplace"
 PLUGIN_LINK = Path("plugins/kbm")
 LEGACY_PLUGIN_NAMES = {"kbmanager"}
 PLUGIN_DIRS = (
-    "commands",
     "scripts",
     "skills",
     "src",

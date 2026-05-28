@@ -1,8 +1,7 @@
 # Interface
 
 本文定义第一层 Interaction & Orchestration。第一层由 Claude Code UI、
-`/kbm:ask`、`kbm-*` skills、自然语言交互、结果展示和 user review
-组成，负责把用户意图编排为第二层 `kb.*` API 调用。
+`kbm-*` skills、自然语言交互、结果展示和 user review 组成，负责把用户意图编排为第二层 `kb.*` API 调用。
 
 除 clean 迁移执行和 `kbm-kb-outline` 明确触发的 outline YAML 更新特许例外外，第一层不直接修改 Markdown/PDF/YAML 对象
 文件，不直接维护对象状态机。所有知识库数据变更必须通过第二层 API 完成。
@@ -11,7 +10,7 @@
 
 第一层负责：
 
-- 接收用户输入：`/kbm:ask`、自然语言、review 决策、备注。
+- 接收用户输入：自然语言、review 决策、备注。
 - 识别用户意图，选择相关 `kbm-*` skill，形成可执行工作流。
 - 使用 Claude Code UI 展示 list/view Markdown、review 草案和需要用户补充的内容。
 - 在 Claude Code UI 中收集用户确认、选择、修改后的 Markdown 或结构化字段。
@@ -36,24 +35,10 @@
 - 只读读取不得产生对象状态变化，不得把索引内容反向写入对象事实。
 - 对象写入 API 会在成功写入后自动调用 `kb.index.rebuild` 重建派生索引；check workflow 直接调用 `kb.index.rebuild`。
 
-## 2. 唯一 Slash Command
+## 2. Commands
 
-只暴露一个 slash command：
-
-```txt
-/kbm:ask <request>
-```
-
-`/kbm:ask` 必须：
-
-1. 理解用户自然语言意图。
-2. 识别用户意图和所需输入。
-3. 选择相关 `kbm-*` skill。
-4. 判断工作流是否需要 review gate。
-5. 调用 `scripts/kbmanager_plugin.py`。
-6. 处理 `needs_llm`、`needs_review`、错误、警告和下一步。
-
-其他细粒度能力只作为 `kb.*` API、skill workflow 或自然语言意图存在，不直接暴露为 slash command。
+KBManager 不暴露 Claude Code commands。细粒度能力只作为 `kb.*` API、
+skill workflow 或自然语言意图存在。
 
 ## 3. Skills
 
@@ -68,13 +53,13 @@
 - `kbm-maintenance`：init、check、clean inspect 和 clean migration。
 - `kbm-research-on`：根据 knowledgebase 的 `description`、`scope` 和 outline 生成 Deep Research prompt。
 
-内嵌在流程里的 LLM 能力不称为 skill。它们是 `system-prompts/` internal prompt module，由 API `needs_llm` 或 `/kbm:ask` 工作流固定触发。
+内嵌在流程里的 LLM 能力不称为 skill。它们是 `system-prompts/` internal prompt module，由 API `needs_llm` 或第一层 workflow 固定触发。
 
 ## 4. 输入与输出
 
 标准输入来源：
 
-- `/kbm:ask` 参数和自然语言。
+- 用户自然语言请求。
 - 用户在 Claude Code UI 中回复的 reviewed Markdown、结构化字段、确认或选择。
 - API 返回的 resume token、review request、warnings 和 errors。
 

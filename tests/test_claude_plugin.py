@@ -7,25 +7,16 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-COMMAND_DIR = REPO_ROOT / "commands"
-
-
 def test_claude_plugin_manifest_is_valid_json() -> None:
     manifest = json.loads((REPO_ROOT / ".claude-plugin/plugin.json").read_text())
 
     assert manifest["name"] == "kbm"
-    assert manifest["commands"] == "./commands/"
+    assert "commands" not in manifest
     assert manifest["skills"] == "./skills/"
 
 
-def test_claude_plugin_exposes_only_ask_command() -> None:
-    assert {path.name for path in COMMAND_DIR.glob("*.md")} == {"ask.md"}
-
-    command = (COMMAND_DIR / "ask.md").read_text(encoding="utf-8")
-    assert "唯一的 KBManager slash command" in command
-    assert "scripts/kbmanager_plugin.py" in command
-    assert "entry" + "point" not in command
-    assert "dry" + "_run" not in command
+def test_claude_plugin_exposes_no_commands() -> None:
+    assert not (REPO_ROOT / "commands").exists()
 
 
 def test_claude_plugin_packages_kbm_skills() -> None:
@@ -33,6 +24,7 @@ def test_claude_plugin_packages_kbm_skills() -> None:
 
     assert skill_names == {
         "kbm-candidate",
+        "kbm-download-paper-pdf",
         "kbm-kb",
         "kbm-maintenance",
         "kbm-note",
@@ -56,15 +48,13 @@ def test_knowledgebase_workflow_does_not_ingest_source_context() -> None:
     api_catalog = (REPO_ROOT / "skills/kbm-usage/SKILL.md").read_text(
         encoding="utf-8"
     )
-    command = (COMMAND_DIR / "ask.md").read_text(encoding="utf-8")
 
-    for text in (knowledgebase_skill, source_skill, api_catalog, command):
+    for text in (knowledgebase_skill, source_skill, api_catalog):
         assert "kb.source.add" in text
     assert "不得调用 `kb.source.add`" in knowledgebase_skill
     assert "不得调用 `kb.candidate.create`" in knowledgebase_skill
     assert "改用 kbm-kb 而不是 source lifecycle" in source_skill
     assert "不创建 source/candidate" in api_catalog
-    assert "不要调用 `kb.source.add`" in command
 
 
 def test_register_marketplace_script_adds_current_plugin(tmp_path: Path) -> None:
@@ -83,7 +73,7 @@ def test_register_marketplace_script_adds_current_plugin(tmp_path: Path) -> None
     plugin_root = tmp_path / "plugins/kbm"
     assert plugin_root.is_dir()
     assert not plugin_root.is_symlink()
-    assert (plugin_root / "commands/ask.md").is_file()
+    assert not (plugin_root / "commands").exists()
     assert (plugin_root / "skills/kbm-usage/SKILL.md").is_file()
     assert (plugin_root / "scripts/kbmanager_plugin.py").is_file()
     assert (plugin_root / "src/kbmanager/application.py").is_file()
@@ -98,7 +88,6 @@ def test_register_marketplace_script_copies_only_plugin_package(tmp_path: Path) 
 
     plugin_root = tmp_path / "plugins/kbm"
     assert {path.name for path in plugin_root.iterdir()} == {
-        "commands",
         "pyproject.toml",
         "scripts",
         "skills",
@@ -160,7 +149,6 @@ def test_command_api_operations_are_supported_by_plugin_helper() -> None:
     import kbmanager_plugin
 
     supported = set(kbmanager_plugin._operation_map())
-    command = (COMMAND_DIR / "ask.md").read_text(encoding="utf-8")
 
     for operation in {
         "kb.init",
@@ -171,7 +159,6 @@ def test_command_api_operations_are_supported_by_plugin_helper() -> None:
         "kb.clean.inspect",
     }:
         assert operation in supported
-    assert "kb.*" in command
 
 
 def test_claude_plugin_package_does_not_contain_user_data_roots(tmp_path: Path) -> None:

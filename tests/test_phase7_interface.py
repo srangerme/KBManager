@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from kbmanager.interface import SlashCommandInterface
+from kbmanager.interface import InteractionInterface
 
 
 class MockApi:
@@ -110,7 +110,7 @@ def test_source_add_orchestrates_source_and_candidate_llm_resumes() -> None:
         }
     )
 
-    result = SlashCommandInterface(api=api, llm=llm).kb_source_add("input.md")
+    result = InteractionInterface(api=api, llm=llm).kb_source_add("input.md")
 
     assert result.to_dict()["status"] == "success"
     assert [call[0] for call in api.calls] == [
@@ -132,7 +132,7 @@ def test_interface_logs_llm_input_and_output(tmp_path: Path) -> None:
     )
     llm = MockLlm({"note_title": {"title": "Generated note"}})
 
-    result = SlashCommandInterface(root=tmp_path, api=api, llm=llm).kb_note_add(content="Body")
+    result = InteractionInterface(root=tmp_path, api=api, llm=llm).kb_note_add(content="Body")
 
     assert result.to_dict()["status"] == "success"
     log_files = list((tmp_path / ".claude/log").glob("*.json"))
@@ -146,7 +146,7 @@ def test_interface_logs_llm_input_and_output(tmp_path: Path) -> None:
 def test_candidate_review_waits_for_decision_after_assist() -> None:
     api = MockApi({"kb.candidate.get": [_success("kb.candidate.get", candidate=_candidate())]})
 
-    result = SlashCommandInterface(api=api).kb_candidate_review("knowledge-1")
+    result = InteractionInterface(api=api).kb_candidate_review("knowledge-1")
 
     assert result.to_dict()["status"] == "needs_review"
     assert result.to_dict()["review_assist"]["summary"] == "Candidate summary."
@@ -160,7 +160,7 @@ def test_candidate_accept_passes_new_review_payload() -> None:
         }
     )
 
-    result = SlashCommandInterface(api=api).kb_candidate_review(
+    result = InteractionInterface(api=api).kb_candidate_review(
         "knowledge-1",
         decision="accept",
         reviewed_markdown={
@@ -205,7 +205,7 @@ def test_candidate_merge_uses_reviewed_payload_without_merge_assist(tmp_path: Pa
         }
     )
 
-    result = SlashCommandInterface(root=tmp_path, api=api).kb_candidate_review(
+    result = InteractionInterface(root=tmp_path, api=api).kb_candidate_review(
         "knowledge-1",
         decision="merge",
         merge_targets=["knowledge-target"],
@@ -264,7 +264,7 @@ def test_knowledgebase_create_orchestrates_single_create_review(tmp_path: Path) 
         }
     )
 
-    result = SlashCommandInterface(root=tmp_path, api=api, llm=llm).kb_knowledgebase_create(
+    result = InteractionInterface(root=tmp_path, api=api, llm=llm).kb_knowledgebase_create(
         title="KB",
         input_path="input.md",
     )
@@ -277,10 +277,10 @@ def test_knowledgebase_create_orchestrates_single_create_review(tmp_path: Path) 
     assert llm.calls[0]["llm_request"]["purpose"] == "kb.knowledgebase.create"
 
 
-def test_read_only_list_commands_display_markdown(tmp_path: Path) -> None:
+def test_read_only_list_workflows_display_markdown(tmp_path: Path) -> None:
     (tmp_path / "indexes").mkdir()
     (tmp_path / "indexes/kb-index.md").write_text("# KB\n", encoding="utf-8")
 
-    result = SlashCommandInterface(root=tmp_path).kb_knowledgebase_list()
+    result = InteractionInterface(root=tmp_path).kb_knowledgebase_list()
 
     assert result.to_dict()["displayed_in_claude"][0]["content"] == "# KB\n"

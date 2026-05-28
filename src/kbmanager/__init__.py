@@ -24,7 +24,7 @@ from kbmanager.application import (
     source_deprecate,
 )
 from kbmanager.contracts import ApiError, ApiResult, ApiStatus
-from kbmanager.interface import ApplicationApiClient, InterfaceResult, SlashCommandInterface
+from kbmanager.interface import ApplicationApiClient, InteractionInterface, InterfaceResult
 from kbmanager.object_paths import ObjectPaths
 from kbmanager.prompts import assemble_prompt, load_system_prompt
 from kbmanager.repository import MarkdownDocument, ObjectMetadata, ObjectRepository
@@ -63,6 +63,6 @@ __all__ = [
     "ObjectRepository",
     "source_add",
     "source_deprecate",
-    "SlashCommandInterface",
+    "InteractionInterface",
     "Workspace",
 ]

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Internal Claude Code plugin bridge for KBManager API calls.
 
-This script is not a public CLI. It exists so plugin slash commands can invoke
-the packaged Python API from Claude Code's Bash tool and receive stable JSON.
+This script is not a public CLI. It exists so Claude Code workflows can invoke
+the packaged Python API from the Bash tool and receive stable JSON.
 """
 
 from __future__ import annotations

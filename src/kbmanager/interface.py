@@ -1,7 +1,7 @@
-"""Slash command orchestration layer.
+"""Claude Code interaction orchestration layer.
 
 This module is the first-layer boundary described by ``docs/Interface.md``.
-It coordinates user-facing commands into second-layer ``kb.*`` API calls, but
+It coordinates user-facing workflows into second-layer ``kb.*`` API calls, but
 does not write object files itself.
 """
 
@@ -133,7 +133,7 @@ class LoggedLlmClient:
         return result
 
 
-class SlashCommandInterface:
+class InteractionInterface:
     def __init__(
         self,
         root: str | Path = ".",
@@ -562,7 +562,7 @@ class SlashCommandInterface:
             return InterfaceResult(
                 status=ApiStatus.NEEDS_REVIEW.value,
                 summary="Knowledgebase index is missing.",
-                next_actions=["Run /kbm:ask check before opening the knowledgebase index."],
+                next_actions=["Run kb.index.rebuild before opening the knowledgebase index."],
                 extra={"missing_index": path},
             )
         return InterfaceResult(
@@ -643,7 +643,7 @@ class SlashCommandInterface:
             return InterfaceResult(
                 status=ApiStatus.NEEDS_REVIEW.value,
                 summary="Note index is missing.",
-                next_actions=["Run /kbm:ask check before opening the note index."],
+                next_actions=["Run kb.index.rebuild before opening the note index."],
                 extra={"missing_index": path},
             )
         return InterfaceResult(

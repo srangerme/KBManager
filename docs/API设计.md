@@ -2,7 +2,7 @@
 
 本文定义第二层 Application API / Domain Service。第二层对 Interface 层暴露 `kb.*` API，通过第三层 Repository / Data Layer 管理 Markdown/PDF/YAML 对象文件。
 
-第二层不依赖 Claude Code 对话上下文。它可以被 `/kbm:ask`、内部 JSON CLI、MCP server、脚本或测试调用。
+第二层不依赖 Claude Code 对话上下文。它可以被内部 JSON helper、MCP server、脚本或测试调用。
 
 ## 1. 职责边界
 

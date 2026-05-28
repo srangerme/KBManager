@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from kbmanager.application import candidate_create, init_workspace, source_add
-from kbmanager.interface import SlashCommandInterface
+from kbmanager.interface import InteractionInterface
 from kbmanager.prompts import assemble_prompt, load_system_prompt, schema_for_output
 
 
@@ -183,7 +183,7 @@ def test_candidate_merge_without_reviewed_payload_waits_for_user(tmp_path: Path)
             }
 
     result = (
-        SlashCommandInterface(root=tmp_path, api=MockApi())
+        InteractionInterface(root=tmp_path, api=MockApi())
         .kb_candidate_review(
             "knowledge-1",
             decision="merge",
