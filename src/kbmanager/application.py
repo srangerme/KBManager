@@ -173,7 +173,6 @@ INDEX_MARKDOWN_PATHS = (
     "indexes/review-queue.md",
 )
 INDEX_YAML_PATHS: tuple[str, ...] = ()
-ALLOWED_ENTRYPOINTS = ("claude_code",)
 BINDTO_SHAPE = (
     "bindto must be [] when there are no knowledgebase bindings, or mappings like "
     "{'kb_id': 'kb-YYYYMMDD-001-title', 'outline_id': 'outline-id', "
@@ -187,57 +186,10 @@ EVIDENCE_SHAPE = (
 )
 
 
-def _api_contract_error(
-    operation: str,
-    *,
-    entrypoint: str | None,
-    dry_run: bool | None,
-) -> ApiResult | None:
-    if entrypoint is None:
-        return ApiResult.failed(
-            operation,
-            "missing_entrypoint",
-            f"{operation} requires entrypoint. Allowed entrypoints: claude_code.",
-            'Pass entrypoint="claude_code".',
-        )
-    if entrypoint not in ALLOWED_ENTRYPOINTS:
-        return ApiResult.failed(
-            operation,
-            "unsupported_entrypoint",
-            (
-                f"{operation} does not allow entrypoint {entrypoint!r}. "
-                "Allowed entrypoints: claude_code."
-            ),
-            'Use entrypoint="claude_code".',
-        )
-    if dry_run is None:
-        return ApiResult.failed(
-            operation,
-            "missing_dry_run",
-            f"{operation} requires dry_run to be explicitly true or false.",
-            "Pass dry_run=true to validate or dry_run=false to execute.",
-        )
-    if not isinstance(dry_run, bool):
-        return ApiResult.failed(
-            operation,
-            "invalid_dry_run",
-            f"{operation} requires dry_run to be a boolean.",
-            "Pass dry_run=true or dry_run=false.",
-        )
-    return None
-
-
 def init_workspace(
     root: str | Path = ".",
-    *,
-    entrypoint: str | None = None,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Initialize a controlled KBManager workspace."""
-
-    contract_error = _api_contract_error(INIT_OPERATION, entrypoint=entrypoint, dry_run=dry_run)
-    if contract_error is not None:
-        return contract_error
 
     try:
         workspace = Workspace(root)
@@ -258,15 +210,6 @@ def init_workspace(
             "Move or rename the conflicting paths, then run kb.init again.",
             diffs=_plan_diffs(plan),
             warnings=plan.conflicts,
-        )
-
-    if dry_run:
-        return ApiResult.success(
-            INIT_OPERATION,
-            objects=ObjectChanges(created=plan.create_directories + plan.create_files),
-            diffs=_plan_diffs(plan),
-            warnings=[],
-            next_actions=["Run kb.init without dry_run to create the workspace files."],
         )
 
     created_paths: list[Path] = []
@@ -300,24 +243,14 @@ def init_workspace(
 def source_add(
     root: str | Path = ".",
     *,
-    entrypoint: str | None = None,
     input_path: str | Path,
     title: str | None = None,
     tags: list[str] | None = None,
     authors: list[str] | None = None,
     resume_token: str | None = None,
     llm_result: dict[str, Any] | None = None,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Add a local Markdown/PDF source through the source-ingest LLM boundary."""
-
-    contract_error = _api_contract_error(
-        SOURCE_ADD_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     input_text = str(input_path)
     try:
@@ -398,12 +331,6 @@ def source_add(
                 ("cleaned", record["cleaned_relative"]),
             )
         ]
-        if dry_run:
-            return ApiResult.success(
-                SOURCE_ADD_OPERATION,
-                objects=ObjectChanges(created=created),
-                diffs=diffs,
-            )
         _write_source_records_atomic(workspace, repository, records)
     except (KBManagerError, OSError) as exc:
         return _failed(
@@ -441,21 +368,11 @@ def source_add(
 def source_deprecate(
     root: str | Path = ".",
     *,
-    entrypoint: str | None = None,
     source_id: str,
     decision: str | None = None,
     reason: str | None = None,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Mark a source as deprecated after user review."""
-
-    contract_error = _api_contract_error(
-        SOURCE_DEPRECATE_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     if not _has_review_decision(decision, "deprecate"):
         return _needs_review(SOURCE_DEPRECATE_OPERATION, ["deprecate", "revise"])
@@ -481,16 +398,6 @@ def source_deprecate(
         relative_path = str(workspace.relative(record.path))
         impacts = _source_deprecation_impacts(repository, source_id)
         diffs = [{"action": "update", "kind": "source", "path": relative_path}]
-        if dry_run:
-            return ApiResult.success(
-                SOURCE_DEPRECATE_OPERATION,
-                objects=ObjectChanges(deprecated=[relative_path]),
-                diffs=diffs,
-                extra={
-                    "source_id": source_id,
-                    "impacts": impacts,
-                },
-            )
         _write_source_metadata(repository, workspace, record, frontmatter)
     except (KBManagerError, OSError) as exc:
         return _failed(
@@ -515,21 +422,11 @@ def source_deprecate(
 def candidate_create(
     root: str | Path = ".",
     *,
-    entrypoint: str | None = None,
     source_ids: list[str] | None = None,
     resume_token: str | None = None,
     llm_result: dict[str, Any] | None = None,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Create pending candidates through the candidate-create LLM boundary."""
-
-    contract_error = _api_contract_error(
-        CANDIDATE_CREATE_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     source_ids = source_ids or []
     token_payload = {"source_ids": source_ids}
@@ -590,14 +487,6 @@ def candidate_create(
         records = _plan_candidate_records(repository, drafts, source_ids)
         created = [f"candidates/pending/{record['id']}.md" for record in records]
         diffs = [{"action": "create", "kind": "candidate", "path": path} for path in created]
-        if dry_run:
-            return ApiResult.success(
-                CANDIDATE_CREATE_OPERATION,
-                objects=ObjectChanges(created=created),
-                diffs=diffs,
-                warnings=warnings,
-                extra=_candidate_create_response_extra(records),
-            )
         _write_candidate_records_atomic(repository, records)
     except (KBManagerError, OSError) as exc:
         return _failed(
@@ -623,19 +512,9 @@ def candidate_create(
 def candidate_get(
     root: str | Path = ".",
     *,
-    entrypoint: str | None = None,
     candidate_id: str,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Return a candidate object and its referenced object summaries."""
-
-    contract_error = _api_contract_error(
-        CANDIDATE_GET_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     try:
         workspace = Workspace(root)
@@ -668,19 +547,8 @@ def candidate_get(
 
 def candidate_next_pending(
     root: str | Path = ".",
-    *,
-    entrypoint: str | None = None,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Return the oldest pending candidate."""
-
-    contract_error = _api_contract_error(
-        CANDIDATE_NEXT_PENDING_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     try:
         workspace = Workspace(root)
@@ -715,9 +583,7 @@ def candidate_next_pending(
 
     result = candidate_get(
         workspace.root,
-        entrypoint="claude_code",
         candidate_id=pending[0].object_id,
-        dry_run=False,
     ).to_dict()
     return ApiResult.success(
         CANDIDATE_NEXT_PENDING_OPERATION,
@@ -728,7 +594,6 @@ def candidate_next_pending(
 def knowledge_accept(
     root: str | Path = ".",
     *,
-    entrypoint: str | None = None,
     candidate_id: str,
     decision: str | None = None,
     reason: str | None = None,
@@ -737,17 +602,8 @@ def knowledge_accept(
     content: str | None = None,
     evidence: list[dict[str, Any]] | None = None,
     bindto: list[dict[str, Any]] | None = None,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Promote a pending candidate to accepted knowledge after user review."""
-
-    contract_error = _api_contract_error(
-        KNOWLEDGE_ACCEPT_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     if not _has_review_decision(decision, "accept"):
         return _needs_review(KNOWLEDGE_ACCEPT_OPERATION, ["accept", "reject", "defer", "merge"])
@@ -796,15 +652,6 @@ def knowledge_accept(
                 "path": str(workspace.relative(record.path)),
             },
         ]
-        if dry_run:
-            return ApiResult.success(
-                KNOWLEDGE_ACCEPT_OPERATION,
-                objects=ObjectChanges(
-                    created=[knowledge_path],
-                ),
-                diffs=diffs,
-                extra={"knowledge_id": candidate_id, "bindto": accepted_frontmatter["bindto"]},
-            )
         _promote_candidate_to_knowledge(
             repository,
             record.path,
@@ -833,21 +680,11 @@ def knowledge_accept(
 def knowledge_reject(
     root: str | Path = ".",
     *,
-    entrypoint: str | None = None,
     candidate_id: str,
     decision: str | None = None,
     reason: str | None = None,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Reject a candidate after user review."""
-
-    contract_error = _api_contract_error(
-        KNOWLEDGE_REJECT_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     if not _has_review_decision(decision, "reject"):
         return _needs_review(KNOWLEDGE_REJECT_OPERATION, ["reject", "revise"])
@@ -858,28 +695,17 @@ def knowledge_reject(
         target_status="rejected",
         decision="reject",
         reason=reason,
-        dry_run=bool(dry_run),
     )
 
 
 def candidate_defer(
     root: str | Path = ".",
     *,
-    entrypoint: str | None = None,
     candidate_id: str,
     decision: str | None = None,
     reason: str | None = None,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Defer a pending candidate after user review."""
-
-    contract_error = _api_contract_error(
-        CANDIDATE_DEFER_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     if not _has_review_decision(decision, "defer"):
         return _needs_review(CANDIDATE_DEFER_OPERATION, ["defer", "accept", "reject"])
@@ -890,14 +716,12 @@ def candidate_defer(
         target_status="deferred",
         decision="defer",
         reason=reason,
-        dry_run=bool(dry_run),
     )
 
 
 def knowledge_merge(
     root: str | Path = ".",
     *,
-    entrypoint: str | None = None,
     candidate_id: str,
     target_knowledge_id: str,
     decision: str | None = None,
@@ -907,17 +731,8 @@ def knowledge_merge(
     content: str | None = None,
     evidence: list[dict[str, Any]] | None = None,
     bindto: list[dict[str, Any]] | None = None,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Merge a reviewed candidate into an existing knowledge object."""
-
-    contract_error = _api_contract_error(
-        KNOWLEDGE_MERGE_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     if not _has_review_decision(decision, "merge"):
         return _needs_review(KNOWLEDGE_MERGE_OPERATION, ["merge", "reject", "revise"])
@@ -970,22 +785,6 @@ def knowledge_merge(
             {"action": "update", "kind": "knowledge", "path": knowledge_relative},
             {"action": "move", "kind": "candidate", "path": rejected_relative},
         ]
-        if dry_run:
-            return ApiResult.success(
-                KNOWLEDGE_MERGE_OPERATION,
-                objects=ObjectChanges(
-                    updated=[
-                        knowledge_relative,
-                        rejected_relative,
-                    ]
-                ),
-                diffs=diffs,
-                extra={
-                    "knowledge_id": target_knowledge_id,
-                    "rejected_candidate_id": candidate_id,
-                    "bindto": merged_frontmatter["bindto"],
-                },
-            )
         _merge_candidate_into_knowledge(
             repository,
             workspace,
@@ -1028,21 +827,11 @@ def knowledge_merge(
 def knowledge_deprecate(
     root: str | Path = ".",
     *,
-    entrypoint: str | None = None,
     knowledge_id: str,
     decision: str | None = None,
     reason: str | None = None,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Mark accepted knowledge as deprecated after user review."""
-
-    contract_error = _api_contract_error(
-        KNOWLEDGE_DEPRECATE_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     if not _has_review_decision(decision, "deprecate"):
         return _needs_review(KNOWLEDGE_DEPRECATE_OPERATION, ["deprecate", "revise"])
@@ -1068,13 +857,6 @@ def knowledge_deprecate(
         )
         relative_path = str(workspace.relative(record.path))
         diffs = [{"action": "update", "kind": "knowledge", "path": relative_path}]
-        if dry_run:
-            return ApiResult.success(
-                KNOWLEDGE_DEPRECATE_OPERATION,
-                objects=ObjectChanges(deprecated=[relative_path]),
-                diffs=diffs,
-                extra={"knowledge_id": knowledge_id},
-            )
         repository.write_markdown(
             relative_path,
             MarkdownDocument(frontmatter=frontmatter, body=document.body),
@@ -1100,7 +882,6 @@ def knowledge_deprecate(
 def knowledgebase_create(
     root: str | Path = ".",
     *,
-    entrypoint: str | None = None,
     title: str,
     input_path: str | Path | None = None,
     description: str | None = None,
@@ -1112,17 +893,8 @@ def knowledgebase_create(
     knowledgebase_id: str | None = None,
     resume_token: str | None = None,
     llm_result: dict[str, Any] | None = None,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Create a knowledge base through LLM draft, review, and approved write gates."""
-
-    contract_error = _api_contract_error(
-        KNOWLEDGEBASE_CREATE_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     try:
         workspace = Workspace(root)
@@ -1263,17 +1035,6 @@ def knowledgebase_create(
             {"action": "create", "kind": "knowledge-base", "path": relative_path},
             {"action": "create", "kind": "knowledgebase-outlines", "path": outlines_relative_path},
         ]
-        if dry_run:
-            return ApiResult.success(
-                KNOWLEDGEBASE_CREATE_OPERATION,
-                objects=ObjectChanges(created=[relative_path, outlines_relative_path]),
-                diffs=diffs,
-                extra={
-                    "knowledgebase_id": kb_id,
-                    "path": relative_path,
-                    "outlines_file": outlines_relative_path,
-                },
-            )
         repository.write_markdown(relative_path, document)
         _write_yaml_file(workspace, outlines_relative_path, outline_document)
     except (KBManagerError, OSError) as exc:
@@ -1300,21 +1061,11 @@ def knowledgebase_create(
 def knowledgebase_outline_create(
     root: str | Path = ".",
     *,
-    entrypoint: str | None = None,
     knowledgebase_id: str,
     outline: dict[str, Any],
     review: dict[str, Any] | None = None,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Create a new outline for an active knowledge base."""
-
-    contract_error = _api_contract_error(
-        KNOWLEDGEBASE_OUTLINE_CREATE_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     if not _review_approved(review):
         return _needs_review(
@@ -1359,18 +1110,6 @@ def knowledgebase_outline_create(
             {"action": "update", "kind": "knowledge-base", "path": relative_path},
             {"action": "update", "kind": "knowledgebase-outlines", "path": outlines_relative_path},
         ]
-        if dry_run:
-            return ApiResult.success(
-                KNOWLEDGEBASE_OUTLINE_CREATE_OPERATION,
-                objects=ObjectChanges(updated=[relative_path, outlines_relative_path]),
-                diffs=diffs,
-                extra={
-                    "knowledgebase_id": knowledgebase_id,
-                    "outline_id": outline["id"],
-                    "path": relative_path,
-                    "outlines_file": outlines_relative_path,
-                },
-            )
         repository.write_markdown(relative_path, updated_document, overwrite=True)
         _write_yaml_file(workspace, outlines_relative_path, outlines_document, overwrite=True)
     except (KBManagerError, OSError) as exc:
@@ -1398,21 +1137,11 @@ def knowledgebase_outline_create(
 def knowledgebase_outline_set_default(
     root: str | Path = ".",
     *,
-    entrypoint: str | None = None,
     knowledgebase_id: str,
     outline_id: str,
     review: dict[str, Any] | None = None,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Set the default outline for an active knowledge base."""
-
-    contract_error = _api_contract_error(
-        KNOWLEDGEBASE_OUTLINE_SET_DEFAULT_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     if not _review_approved(review):
         return _needs_review(
@@ -1450,13 +1179,6 @@ def knowledgebase_outline_set_default(
             {"action": "update", "kind": "knowledge-base", "path": relative_path},
             {"action": "update", "kind": "knowledgebase-outlines", "path": outlines_relative_path},
         ]
-        if dry_run:
-            return ApiResult.success(
-                KNOWLEDGEBASE_OUTLINE_SET_DEFAULT_OPERATION,
-                objects=ObjectChanges(updated=[relative_path, outlines_relative_path]),
-                diffs=diffs,
-                extra={"knowledgebase_id": knowledgebase_id, "outline_id": outline_id},
-            )
         repository.write_markdown(relative_path, updated_document, overwrite=True)
         _write_yaml_file(workspace, outlines_relative_path, outlines_document, overwrite=True)
     except (KBManagerError, OSError) as exc:
@@ -1478,22 +1200,12 @@ def knowledgebase_outline_set_default(
 def knowledgebase_outline_archive(
     root: str | Path = ".",
     *,
-    entrypoint: str | None = None,
     knowledgebase_id: str,
     outline_id: str,
     review: dict[str, Any] | None = None,
     allow_existing_bindings: bool = False,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Archive a non-default outline."""
-
-    contract_error = _api_contract_error(
-        KNOWLEDGEBASE_OUTLINE_ARCHIVE_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     if not _review_approved(review):
         return _needs_review(
@@ -1538,17 +1250,6 @@ def knowledgebase_outline_archive(
             {"action": "update", "kind": "knowledge-base", "path": relative_path},
             {"action": "update", "kind": "knowledgebase-outlines", "path": outlines_relative_path},
         ]
-        if dry_run:
-            return ApiResult.success(
-                KNOWLEDGEBASE_OUTLINE_ARCHIVE_OPERATION,
-                objects=ObjectChanges(updated=[relative_path, outlines_relative_path]),
-                diffs=diffs,
-                extra={
-                    "knowledgebase_id": knowledgebase_id,
-                    "outline_id": outline_id,
-                    "bound_knowledge": sorted(bound),
-                },
-            )
         repository.write_markdown(relative_path, updated_document, overwrite=True)
         _write_yaml_file(workspace, outlines_relative_path, outlines_document, overwrite=True)
     except (KBManagerError, OSError) as exc:
@@ -1574,20 +1275,10 @@ def knowledgebase_outline_archive(
 def knowledgebase_map(
     root: str | Path = ".",
     *,
-    entrypoint: str | None = None,
     knowledgebase_id: str | None = None,
     output_path: str | Path | None = None,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Generate a temporary Mermaid knowledge hierarchy map."""
-
-    contract_error = _api_contract_error(
-        KNOWLEDGEBASE_MAP_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     try:
         workspace = Workspace(root)
@@ -1595,9 +1286,8 @@ def knowledgebase_map(
         records = _all_records(repository)
         markdown, issues = _knowledgebase_map_markdown(records, workspace, knowledgebase_id)
         target = Path(output_path) if output_path is not None else _temporary_map_path()
-        if not dry_run:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(markdown, encoding="utf-8")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(markdown, encoding="utf-8")
     except (KBManagerError, OSError) as exc:
         return _failed(
             KNOWLEDGEBASE_MAP_OPERATION,
@@ -1621,24 +1311,14 @@ def knowledgebase_map(
 def note_add(
     root: str | Path = ".",
     *,
-    entrypoint: str | None = None,
     content: str,
     title: str | None = None,
     note_id: str | None = None,
     needs_llm: bool = False,
     resume_token: str | None = None,
     llm_result: dict[str, Any] | None = None,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Add an active note."""
-
-    contract_error = _api_contract_error(
-        NOTE_ADD_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     try:
         llm_note: dict[str, Any] = {}
@@ -1698,13 +1378,6 @@ def note_add(
             body=_note_body(content),
         )
         diffs = [{"action": "create", "kind": "note", "path": relative_path}]
-        if dry_run:
-            return ApiResult.success(
-                NOTE_ADD_OPERATION,
-                objects=ObjectChanges(created=[relative_path]),
-                diffs=diffs,
-                extra=_note_response_extra(new_note_id, relative_path, document),
-            )
         repository.write_markdown(relative_path, document)
     except (KBManagerError, OSError) as exc:
         return _failed(
@@ -1726,19 +1399,9 @@ def note_add(
 def note_get(
     root: str | Path = ".",
     *,
-    entrypoint: str | None = None,
     note_id: str,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Return a note object by ID."""
-
-    contract_error = _api_contract_error(
-        NOTE_GET_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     try:
         workspace = Workspace(root)
@@ -1763,21 +1426,11 @@ def note_get(
 def note_deprecate(
     root: str | Path = ".",
     *,
-    entrypoint: str | None = None,
     note_id: str,
     reason: str | None = None,
     decision: str | None = None,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Mark a note deprecated and move it to notes/deprecated."""
-
-    contract_error = _api_contract_error(
-        NOTE_DEPRECATE_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     if not _has_review_decision(decision, "deprecate"):
         return _needs_review(NOTE_DEPRECATE_OPERATION, ["deprecate", "revise"])
@@ -1812,13 +1465,6 @@ def note_deprecate(
                 "path": deprecated_relative,
             }
         ]
-        if dry_run:
-            return ApiResult.success(
-                NOTE_DEPRECATE_OPERATION,
-                objects=ObjectChanges(deprecated=[deprecated_relative]),
-                diffs=diffs,
-                extra={"note_id": note_id, "path": deprecated_relative},
-            )
         _move_or_update_note_document(
             repository,
             record.path,
@@ -1845,19 +1491,8 @@ def note_deprecate(
 
 def clean_inspect(
     root: str | Path = ".",
-    *,
-    entrypoint: str | None = None,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Inspect workspace drift from the current object layout and schema."""
-
-    contract_error = _api_contract_error(
-        CLEAN_INSPECT_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     try:
         workspace = Workspace(root)
@@ -1914,20 +1549,10 @@ def clean_inspect(
 def index_rebuild(
     root: str | Path = ".",
     *,
-    entrypoint: str | None = None,
     scope: str = "all",
     object_id: str | None = None,
-    dry_run: bool | None = None,
 ) -> ApiResult:
     """Rebuild derived indexes from object files and report consistency issues."""
-
-    contract_error = _api_contract_error(
-        INDEX_REBUILD_OPERATION,
-        entrypoint=entrypoint,
-        dry_run=dry_run,
-    )
-    if contract_error is not None:
-        return contract_error
 
     try:
         workspace = Workspace(root)
@@ -1944,14 +1569,6 @@ def index_rebuild(
         )
         diffs = _index_diffs(workspace, planned_indexes)
         updated = [diff["path"] for diff in diffs if diff["action"] in {"create", "update"}]
-        if dry_run:
-            return ApiResult.success(
-                INDEX_REBUILD_OPERATION,
-                objects=ObjectChanges(updated=updated),
-                diffs=diffs,
-                warnings=_issue_warnings(issues),
-                extra={"issues": issues, "index_paths": sorted(planned_indexes)},
-            )
         _write_index_files(workspace, planned_indexes)
     except (KBManagerError, OSError) as exc:
         return _failed(
@@ -2857,7 +2474,6 @@ def _move_reviewed_candidate(
     target_status: str,
     decision: str,
     reason: str | None,
-    dry_run: bool,
 ) -> ApiResult:
     try:
         workspace = Workspace(root)
@@ -2880,13 +2496,6 @@ def _move_reviewed_candidate(
                 "path": target_relative,
             }
         ]
-        if dry_run:
-            return ApiResult.success(
-                operation,
-                objects=ObjectChanges(updated=[target_relative]),
-                diffs=diffs,
-                extra={"candidate_id": candidate_id, "candidate_status": target_status},
-            )
         _move_candidate_document(
             repository,
             workspace,
@@ -3881,7 +3490,7 @@ def _success_with_index_rebuild(
     next_actions: list[str] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> ApiResult:
-    rebuild = index_rebuild(root, entrypoint="claude_code", dry_run=False)
+    rebuild = index_rebuild(root)
     rebuild_data = rebuild.to_dict()
     rebuild_diffs = [diff for diff in rebuild.diffs if diff.get("action") in {"create", "update"}]
     merged_objects = ObjectChanges(

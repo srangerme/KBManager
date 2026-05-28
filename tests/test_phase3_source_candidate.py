@@ -26,15 +26,13 @@ def _source_llm_result(input_path: str = "incoming.md") -> dict[str, object]:
 
 
 def _create_source(tmp_path: Path) -> str:
-    init_workspace(tmp_path, entrypoint="claude_code", dry_run=False)
+    init_workspace(tmp_path)
     (tmp_path / "incoming.md").write_text("# Raw\n\nOriginal material.", encoding="utf-8")
     first = source_add(
-        tmp_path, entrypoint="claude_code", dry_run=False, input_path="incoming.md"
+        tmp_path, input_path="incoming.md"
     ).to_dict()
     resumed = source_add(
         tmp_path,
-        entrypoint="claude_code",
-        dry_run=False,
         input_path="incoming.md",
         resume_token=first["resume"]["token"],
         llm_result=_source_llm_result(),
@@ -61,8 +59,6 @@ def _create_active_kb(tmp_path: Path) -> str:
     }
     result = knowledgebase_create(
         tmp_path,
-        entrypoint="claude_code",
-        dry_run=False,
         title="Research KB",
         review={"decision": "approve"},
         **payload,
@@ -97,11 +93,11 @@ def _candidate_llm_result(source_id: str, kb_id: str) -> dict[str, object]:
 
 
 def test_source_add_needs_llm_does_not_write(tmp_path: Path) -> None:
-    init_workspace(tmp_path, entrypoint="claude_code", dry_run=False)
+    init_workspace(tmp_path)
     (tmp_path / "incoming.md").write_text("# Raw\n", encoding="utf-8")
 
     result = source_add(
-        tmp_path, entrypoint="claude_code", dry_run=False, input_path="incoming.md"
+        tmp_path, input_path="incoming.md"
     ).to_dict()
 
     assert result["status"] == "needs_llm"
@@ -124,13 +120,11 @@ def test_candidate_create_writes_pending_candidate_with_bindto(tmp_path: Path) -
     source_id = _create_source(tmp_path)
     kb_id = _create_active_kb(tmp_path)
     first = candidate_create(
-        tmp_path, entrypoint="claude_code", dry_run=False, source_ids=[source_id]
+        tmp_path, source_ids=[source_id]
     ).to_dict()
 
     result = candidate_create(
         tmp_path,
-        entrypoint="claude_code",
-        dry_run=False,
         source_ids=[source_id],
         resume_token=first["resume"]["token"],
         llm_result=_candidate_llm_result(source_id, kb_id),
@@ -153,15 +147,13 @@ def test_candidate_create_rejects_invalid_bindto_outline_node(tmp_path: Path) ->
     source_id = _create_source(tmp_path)
     kb_id = _create_active_kb(tmp_path)
     first = candidate_create(
-        tmp_path, entrypoint="claude_code", dry_run=False, source_ids=[source_id]
+        tmp_path, source_ids=[source_id]
     ).to_dict()
     llm_result = _candidate_llm_result(source_id, kb_id)
     llm_result["candidates"][0]["bindto"][0]["node_id"] = "missing"
 
     result = candidate_create(
         tmp_path,
-        entrypoint="claude_code",
-        dry_run=False,
         source_ids=[source_id],
         resume_token=first["resume"]["token"],
         llm_result=llm_result,
@@ -184,7 +176,7 @@ def test_candidate_create_rejects_archived_source_status(tmp_path: Path) -> None
     )
 
     result = candidate_create(
-        tmp_path, entrypoint="claude_code", dry_run=False, source_ids=[source_id]
+        tmp_path, source_ids=[source_id]
     ).to_dict()
 
     assert result["status"] == "failed"
@@ -195,22 +187,20 @@ def test_candidate_get_and_next_pending(tmp_path: Path) -> None:
     source_id = _create_source(tmp_path)
     kb_id = _create_active_kb(tmp_path)
     first = candidate_create(
-        tmp_path, entrypoint="claude_code", dry_run=False, source_ids=[source_id]
+        tmp_path, source_ids=[source_id]
     ).to_dict()
     candidate_create(
         tmp_path,
-        entrypoint="claude_code",
-        dry_run=False,
         source_ids=[source_id],
         resume_token=first["resume"]["token"],
         llm_result=_candidate_llm_result(source_id, kb_id),
     )
 
     got = candidate_get(
-        tmp_path, entrypoint="claude_code", dry_run=False, candidate_id="knowledge-20260520-001"
+        tmp_path, candidate_id="knowledge-20260520-001"
     ).to_dict()
     next_pending = candidate_next_pending(
-        tmp_path, entrypoint="claude_code", dry_run=False
+        tmp_path
     ).to_dict()
 
     assert got["status"] == "success"
@@ -221,12 +211,10 @@ def test_source_deprecate_reports_evidence_impacts(tmp_path: Path) -> None:
     source_id = _create_source(tmp_path)
     kb_id = _create_active_kb(tmp_path)
     first = candidate_create(
-        tmp_path, entrypoint="claude_code", dry_run=False, source_ids=[source_id]
+        tmp_path, source_ids=[source_id]
     ).to_dict()
     candidate_create(
         tmp_path,
-        entrypoint="claude_code",
-        dry_run=False,
         source_ids=[source_id],
         resume_token=first["resume"]["token"],
         llm_result=_candidate_llm_result(source_id, kb_id),
@@ -234,8 +222,6 @@ def test_source_deprecate_reports_evidence_impacts(tmp_path: Path) -> None:
 
     result = source_deprecate(
         tmp_path,
-        entrypoint="claude_code",
-        dry_run=False,
         source_id=source_id,
         decision="deprecate",
         reason="Superseded.",

@@ -24,8 +24,8 @@ def test_claude_plugin_exposes_only_ask_command() -> None:
     command = (COMMAND_DIR / "ask.md").read_text(encoding="utf-8")
     assert "唯一的 KBManager slash command" in command
     assert "scripts/kbmanager_plugin.py" in command
-    assert "entrypoint" in command
-    assert "dry_run" in command
+    assert "entry" + "point" not in command
+    assert "dry" + "_run" not in command
 
 
 def test_claude_plugin_packages_kbm_skills() -> None:
@@ -196,7 +196,7 @@ def test_plugin_helper_invokes_api_with_project_dir(tmp_path: Path) -> None:
             sys.executable,
             str(REPO_ROOT / "scripts/kbmanager_plugin.py"),
             "kb.init",
-            '{"entrypoint": "claude_code", "dry_run": true}',
+            "{}",
         ],
         check=True,
         capture_output=True,
@@ -207,10 +207,10 @@ def test_plugin_helper_invokes_api_with_project_dir(tmp_path: Path) -> None:
     result = json.loads(completed.stdout)
     assert result["status"] == "success"
     assert result["operation"] == "kb.init"
-    assert not (tmp_path / "data").exists()
+    assert (tmp_path / "data").exists()
 
 
-def test_plugin_helper_does_not_inject_missing_api_contract(tmp_path: Path) -> None:
+def test_plugin_helper_rejects_removed_api_contract_fields(tmp_path: Path) -> None:
     env = os.environ.copy()
     env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
     env["CLAUDE_PROJECT_DIR"] = str(tmp_path)
@@ -220,17 +220,15 @@ def test_plugin_helper_does_not_inject_missing_api_contract(tmp_path: Path) -> N
             sys.executable,
             str(REPO_ROOT / "scripts/kbmanager_plugin.py"),
             "kb.init",
-            "{}",
+            '{"entry' + 'point": "claude_code", "dry' + '_run": true}',
         ],
-        check=True,
         capture_output=True,
         text=True,
         env=env,
     )
 
-    result = json.loads(completed.stdout)
-    assert result["status"] == "failed"
-    assert result["errors"][0]["code"] == "missing_entrypoint"
+    assert completed.returncode != 0
+    assert "unexpected keyword argument" in completed.stderr
 
 
 def test_plugin_helper_does_not_import_kbmanager_from_project_dir(tmp_path: Path) -> None:
@@ -249,7 +247,7 @@ def test_plugin_helper_does_not_import_kbmanager_from_project_dir(tmp_path: Path
             sys.executable,
             str(REPO_ROOT / "scripts/kbmanager_plugin.py"),
             "kb.init",
-            '{"entrypoint": "claude_code", "dry_run": true}',
+            "{}",
         ],
         check=True,
         capture_output=True,

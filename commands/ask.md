@@ -46,9 +46,6 @@ description: 理解 KBManager 请求并编排正确的 API 工作流
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" <kb.operation> '<payload-json>' --pretty
 ```
 
-Payload 必须是 JSON object。每个 `kb.*` API payload 都必须包含 `entrypoint` 和 `dry_run`。
-从 Claude Code UI 调用时使用 `entrypoint: "claude_code"`。
-验证请求且不执行写入、文件移动或 LLM resume 时，设置 `dry_run: true`。
 
 读取 JSON result 并报告 `status`、`operation`、created/updated/deprecated objects、
 diffs、warnings、errors、review options、returned IDs 和 next actions。

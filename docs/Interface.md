@@ -60,7 +60,6 @@
 所有 KBManager skill 名称必须以 `kbm-` 开头。
 
 - `kbm-basic`：目录结构、对象边界、文件职责、通用规则、禁令和受控直接编辑例外。
-- `kbm-api-ui`：Claude Code UI 可调用的 `kb.*` API、参数、`dry_run`、review gate、`needs_llm` 和结果处理。
 - `kbm-source`：source add、source deprecate。
 - `kbm-candidate`：candidate create/get/next pending/review。
 - `kbm-note`：note add/get/list/view/deprecate。
@@ -192,22 +191,14 @@ resume:
 - `kb.clean.inspect`
 - list/view 只读展示
 
-## 8. Entrypoint And Dry Run
 
 所有 `kb.*` API payload 必须包含：
 
 ```yml
-entrypoint: claude_code
-dry_run: false
 ```
 
 规则：
 
-- `entrypoint` 是必选值，当前设计仅支持 `claude_code`。
-- API 必须在入口处校验当前 operation 是否允许该 `entrypoint` 调用。
-- 不允许时返回 `failed`，错误中说明 operation、entrypoint 和允许的入口。
-- `dry_run: true` 时只校验 payload、entrypoint、对象存在性、状态转换前置条件和 review gate 要求，不执行写入、文件移动或 LLM resume。
-- `dry_run: true` 可返回拟执行计划、缺失参数、review gate 要求和失败原因。
 
 ## 9. Workflow Summary
 

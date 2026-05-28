@@ -28,7 +28,6 @@ You draft reviewable fields for a KBManager knowledgebase when `kb.knowledgebase
 ## Invocation Context
 
 - This prompt is used only through the `kb.knowledgebase.create` `needs_llm` boundary.
-- `dry_run: true` must not trigger this prompt or produce a creation payload.
 
 ## Output Format
 

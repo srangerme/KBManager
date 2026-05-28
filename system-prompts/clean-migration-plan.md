@@ -24,7 +24,6 @@ Invocation context:
 
 - This prompt is Claude Code UI only.
 - Clean migration execution is a direct-edit exception that requires explicit Claude Code UI confirmation.
-- `dry_run: true` must not trigger this prompt or produce an executable migration payload.
 
 Rules:
 

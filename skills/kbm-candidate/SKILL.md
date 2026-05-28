@@ -27,7 +27,6 @@ flowchart TD
 
 - 通常由 `kbm-source` 在 source add 成功后强制调用。
 - 也可在用户明确要求从已有 source IDs 创建 candidates 时调用。
-- 使用 `kb.candidate.create`，payload 包含 `source_ids`、`entrypoint: "claude_code"` 和 `dry_run`。
 - API 返回 `needs_llm` 时，生成 API 请求的结构化 candidate draft list，并用同一 resume token 恢复。
 - 只创建 pending candidates，不创建 accepted knowledge。
 - 没有 review gate，但可能返回 deprecated source warnings。

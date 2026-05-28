@@ -32,7 +32,6 @@ flowchart TD
 ```
 
 1. 收集 title 和 source-like definition context。
-2. 调用 `kb.knowledgebase.create`，payload 包含 `input_path`、`title`、`entrypoint` 和 `dry_run`。
 3. API 返回 `needs_llm` 时，按返回的 `llm_request` 生成 description、tags、scope、default outline 和 outlines draft，并用同一 resume token 恢复。
 4. API 返回 `needs_review` 时，在 Claude Code UI 中展示 draft，包含 scope includes/excludes、default outline、outline nodes 和风险提示。
 5. 收集明确批准或编辑后的 reviewed payload。

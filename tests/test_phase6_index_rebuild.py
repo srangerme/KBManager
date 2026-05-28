@@ -133,10 +133,10 @@ def _seed_new_model(tmp_path: Path, *, bad_outline: bool = False) -> None:
 
 
 def test_index_rebuild_derives_knowledgebase_members_from_bindto(tmp_path: Path) -> None:
-    init_workspace(tmp_path, entrypoint="claude_code", dry_run=False)
+    init_workspace(tmp_path)
     _seed_new_model(tmp_path)
 
-    result = index_rebuild(tmp_path, entrypoint="claude_code", dry_run=False).to_dict()
+    result = index_rebuild(tmp_path).to_dict()
 
     assert result["status"] == "success"
     kb_index = (tmp_path / "indexes/knowledgebase/kb-20260520-001-knowledge-index.md").read_text(
@@ -147,35 +147,22 @@ def test_index_rebuild_derives_knowledgebase_members_from_bindto(tmp_path: Path)
 
 
 def test_index_rebuild_reports_invalid_bindto_node_id(tmp_path: Path) -> None:
-    init_workspace(tmp_path, entrypoint="claude_code", dry_run=False)
+    init_workspace(tmp_path)
     _seed_new_model(tmp_path, bad_outline=True)
 
-    result = index_rebuild(tmp_path, entrypoint="claude_code", dry_run=True).to_dict()
+    result = index_rebuild(tmp_path).to_dict()
 
     assert result["status"] == "success"
     assert result["issues"][0]["code"] == "invalid_bindto_node_id"
 
 
-def test_index_rebuild_dry_run_does_not_write(tmp_path: Path) -> None:
-    init_workspace(tmp_path, entrypoint="claude_code", dry_run=False)
-    _seed_new_model(tmp_path)
-    before = (tmp_path / "indexes/knowledge-index.md").read_text(encoding="utf-8")
-
-    result = index_rebuild(tmp_path, entrypoint="claude_code", dry_run=True).to_dict()
-
-    assert result["status"] == "success"
-    assert (tmp_path / "indexes/knowledge-index.md").read_text(encoding="utf-8") == before
-
-
 def test_knowledgebase_map_writes_outline_bindto_mermaid(tmp_path: Path) -> None:
-    init_workspace(tmp_path, entrypoint="claude_code", dry_run=False)
+    init_workspace(tmp_path)
     _seed_new_model(tmp_path)
     output = tmp_path / "map.md"
 
     result = knowledgebase_map(
         tmp_path,
-        entrypoint="claude_code",
-        dry_run=False,
         knowledgebase_id="kb-20260520-001",
         output_path=output,
     ).to_dict()
@@ -186,22 +173,3 @@ def test_knowledgebase_map_writes_outline_bindto_mermaid(tmp_path: Path) -> None
     assert "flowchart LR" in markdown
     assert "Section 1" in markdown
     assert "Accepted Knowledge" in markdown
-
-
-def test_knowledgebase_map_dry_run_does_not_write_output(tmp_path: Path) -> None:
-    init_workspace(tmp_path, entrypoint="claude_code", dry_run=False)
-    _seed_new_model(tmp_path)
-    output = tmp_path / "map.md"
-
-    result = knowledgebase_map(
-        tmp_path,
-        entrypoint="claude_code",
-        dry_run=True,
-        knowledgebase_id="kb-20260520-001",
-        output_path=output,
-    ).to_dict()
-
-    assert result["status"] == "success"
-    assert result["path"] == str(output)
-    assert "flowchart LR" in result["markdown"]
-    assert not output.exists()

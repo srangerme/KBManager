@@ -90,8 +90,6 @@ class ApplicationApiClient:
 
     def call(self, operation: str, **kwargs: Any) -> dict[str, Any]:
         function = _APPLICATION_OPERATIONS[operation]
-        kwargs.setdefault("entrypoint", "claude_code")
-        kwargs.setdefault("dry_run", False)
         return function(self.root, **kwargs).to_dict()
 
 
@@ -147,9 +145,9 @@ class SlashCommandInterface:
         self.api = api or ApplicationApiClient(root)
         self.llm = LoggedLlmClient(self.root, llm) if llm is not None else None
 
-    def kb_init(self, *, dry_run: bool = False) -> InterfaceResult:
+    def kb_init(self) -> InterfaceResult:
         calls: list[ApiCallRecord] = []
-        result = self._call(calls, "kb.init", dry_run=dry_run)
+        result = self._call(calls, "kb.init")
         return self._from_api_result(result, calls, "Initialized KBManager workspace.")
 
     def kb_source_add(

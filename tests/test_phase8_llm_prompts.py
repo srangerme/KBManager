@@ -16,15 +16,13 @@ def _source_llm_result(input_path: str = "incoming.md") -> dict[str, object]:
 
 
 def _create_source(tmp_path: Path) -> str:
-    init_workspace(tmp_path, entrypoint="claude_code", dry_run=False)
+    init_workspace(tmp_path)
     (tmp_path / "incoming.md").write_text("# Raw\n", encoding="utf-8")
     first = source_add(
-        tmp_path, entrypoint="claude_code", dry_run=False, input_path="incoming.md"
+        tmp_path, input_path="incoming.md"
     ).to_dict()
     resumed = source_add(
         tmp_path,
-        entrypoint="claude_code",
-        dry_run=False,
         input_path="incoming.md",
         resume_token=first["resume"]["token"],
         llm_result=_source_llm_result(),
@@ -70,13 +68,11 @@ def test_prompt_assembly_includes_output_schema() -> None:
 def test_candidate_llm_output_cannot_create_accepted_knowledge(tmp_path: Path) -> None:
     source_id = _create_source(tmp_path)
     first = candidate_create(
-        tmp_path, entrypoint="claude_code", dry_run=False, source_ids=[source_id]
+        tmp_path, source_ids=[source_id]
     ).to_dict()
 
     result = candidate_create(
         tmp_path,
-        entrypoint="claude_code",
-        dry_run=False,
         source_ids=[source_id],
         resume_token=first["resume"]["token"],
         llm_result={
@@ -105,13 +101,11 @@ def test_candidate_llm_output_cannot_create_accepted_knowledge(tmp_path: Path) -
 def test_candidate_draft_without_evidence_is_rejected(tmp_path: Path) -> None:
     source_id = _create_source(tmp_path)
     first = candidate_create(
-        tmp_path, entrypoint="claude_code", dry_run=False, source_ids=[source_id]
+        tmp_path, source_ids=[source_id]
     ).to_dict()
 
     result = candidate_create(
         tmp_path,
-        entrypoint="claude_code",
-        dry_run=False,
         source_ids=[source_id],
         resume_token=first["resume"]["token"],
         llm_result={
@@ -137,7 +131,7 @@ def test_candidate_create_llm_request_includes_source_context(tmp_path: Path) ->
     source_id = _create_source(tmp_path)
 
     first = candidate_create(
-        tmp_path, entrypoint="claude_code", dry_run=False, source_ids=[source_id]
+        tmp_path, source_ids=[source_id]
     ).to_dict()
 
     source_context = first["llm_request"]["prompt"]["sections"][1]["content"]["source_context"]

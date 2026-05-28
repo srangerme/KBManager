@@ -36,8 +36,6 @@ actor:
   type: user | llm | system
   id: user
 arguments: {}
-entrypoint: claude_code
-dry_run: false
 context:
   trace_id: trace-20260520-001
 ```
@@ -63,18 +61,10 @@ next_actions: []
 规则：
 
 - API 必须返回结构化错误。
-- 所有 API 请求必须携带 `entrypoint: claude_code`。
-- 所有 API 请求必须携带 `dry_run: true | false`。`dry_run: true` 时只校验 payload、entrypoint、对象存在性、状态转换前置条件和 review gate 要求，不执行写入、文件移动或 LLM resume。
-- API 必须在入口处校验 operation 是否允许当前 `entrypoint` 调用。不允许时返回 `failed`，错误中说明 operation、entrypoint 和允许入口。
 - `request_id`、`actor`、`context.trace_id` 等 envelope 字段可由 Interface、脚本或未来 server 层用于审计和追踪；当前公开 API 不要求这些字段，也不把它们写入对象事实。
 - `needs_llm` 响应不得产生对象写入、状态变更或文件移动。采集类 API 可以在返回 `failed` 时写入诊断性失败报告，例如 `kb.source.add` 的 URL 采集失败报告写入 `data/failed/`；该失败报告不是 source、candidate、knowledge、knowledge base 或 note 对象，也不得被索引当作事实来源。
 - `needs_review` 响应不得产生任何对象写入、状态变更或文件移动。
 - 对象引用统一使用 ID。pending/deferred/rejected candidate 使用全局 knowledge ID；candidate 被 accept 后，原 candidate 文件被原子提升/迁移为正式 knowledge 文件，同一 ID 不得同时存在 candidate 文件和 knowledge 文件。
-
-Entrypoint 规则：
-
-- `claude_code` 可以调用所有 `kb.*` API，并负责 Claude Code UI review 交互。
-- 设计上不再暴露外部聊天工具调用入口；历史实现若仍存在，不属于当前公开 API 契约。
 
 ## 3. LLM 辅助机制
 
@@ -209,7 +199,6 @@ API 收到 `llm_result` 后必须校验：
 
 ### `kb.init`
 
-- 输入：目标目录，默认使用调用方当前工作目录；必选 `entrypoint` 和 `dry_run`。
 - 读取：KBManager 发布包中的默认目录清单和模板文件。
 - 写入：在目标目录创建受控工作区目录结构、`indexes/`、必要的空索引占位文件，以及每个初始化目录下的空 `KBM.ignore`；对象模板保留为 KBManager 发布包内的系统资源，不写入用户工作区。
 - 默认创建路径：
@@ -229,7 +218,6 @@ API 收到 `llm_result` 后必须校验：
 
 ### `kb.source.add`
 
-- 输入：目录、文件路径或 URL；必选 `entrypoint` 和 `dry_run`；可选标题和标签。本地目录或文件可位于本机任意可读位置，不要求在 workspace 内。
 - 读取：source 模板和输入资源。
 - 写入：source 对象字段 `id`、`type: source`、`title`、`source_type`、`status: raw`、`path`、`summary`、`cleaned`、`deprecated_at`、`deprecated_reason`、`tags`、`created`、`updated`；URL 直连成功时原文保存为 `data/raw/html/*.html` + `.meta.yml`，URL 直连失败但 Playwright PDF 导出成功时保存为 `data/raw/pdf/*.pdf` + `.meta.yml`，PDF 原文保存为 `data/raw/pdf/*.pdf` + `.meta.yml`，Markdown 原文保存为 `data/raw/md/*.md`。
 - LLM 辅助：必需。API 固定返回 `needs_llm`，由 Claude Code 在同一次 LLM 调用中生成 source `summary`、`tags` 和 `cleaned_content` 后 resume。
@@ -251,7 +239,6 @@ API 收到 `llm_result` 后必须校验：
 
 ### `kb.candidate.create`
 
-- 输入：`source_ids`，至少一个非空；必选 `entrypoint` 和 `dry_run`。每个 ID 必须指向已存在 source。source 可为 `raw` 或 `deprecated`，deprecated source 会产生 warning 供后续 user review 时确认。
 - 读取：上游 source、candidate 模板、active knowledge base 的 `description`、`tags`、`scope` 和 `outline`、`candidate-create.md`。
 - 写入：一个或多个 pending candidate Markdown，字段包含 `id`、`type: candidate`、`title`、`status: pending`、`bindto`、`outline_change_suggestions`、`summary`、`evidence`、空 `review.reviewed_at`、空 `review.decision`、空 `review.reason`、`created`、`updated`。
 - LLM 辅助：需要。API 返回 `needs_llm`，Claude Code 先依据已有 knowledge base 的 `description/scope/outline` 判断 source 中哪些内容符合已有知识库要求，再生成 candidate draft list、`bindto` 建议和 outline 修改建议后 resume；candidate 只能从 source 生成，不能从 note 生成。
@@ -285,7 +272,6 @@ candidates:
 
 ### `kb.candidate.get`
 
-- 输入：candidate/knowledge ID；必选 `entrypoint` 和 `dry_run`。
 - 读取：candidate Markdown 和必要引用摘要。
 - 写入：无。
 - LLM 辅助：不需要。
@@ -293,7 +279,6 @@ candidates:
 
 ### `kb.candidate.next_pending`
 
-- 输入：必选 `entrypoint` 和 `dry_run`；当前不支持过滤条件。
 - 读取：pending candidate 或 review queue。
 - 写入：无。
 - LLM 辅助：不需要。
@@ -301,7 +286,6 @@ candidates:
 
 ### `kb.candidate.defer`
 
-- 输入：candidate/knowledge ID、延后原因或备注；必选 `entrypoint` 和 `dry_run`。
 - 读取：candidate。
 - 写入：candidate `status: deferred`、`review.reviewed_at`、`review.decision`、`review.reason` 和 `updated`。
 - LLM 辅助：不需要。
@@ -312,7 +296,6 @@ candidates:
 
 ### `kb.knowledge.accept`
 
-- 输入：candidate/knowledge ID、review 决策、review 备注、用户 review 后的标题、`summary`、`content`、`evidence` 和 `bindto`；必选 `entrypoint` 和 `dry_run`。
 - 读取：candidate、knowledge 模板、已有 knowledge base 的 `outline` 摘要。
 - 写入：将 pending candidate 文件原子提升/迁移为正式 knowledge Markdown，写入 `type: knowledge`、`status: accepted`、`summary`、`evidence`、review 字段和 `bindto`；同一 ID 不保留 candidate 文件。成功写入后 API 自动调用 `kb.index.rebuild`，由索引根据 knowledge `bindto` 派生 knowledge base 成员视图。
 - LLM 辅助：不需要。`bindto` 和 outline 修改建议在 `kb.candidate.create` 或 Interface review 辅助阶段生成，用户通过 Claude Code reviewed content 最终确认。
@@ -323,7 +306,6 @@ candidates:
 
 ### `kb.knowledge.merge`
 
-- 输入：pending candidate ID、目标 knowledge ID、review 决策、review 备注、用户 review 后的合并 `summary`、`content`、`evidence` 和 `bindto`；必选 `entrypoint` 和 `dry_run`。
 - 读取：pending candidate、目标 knowledge、来源和已有 knowledge base 的 `outline` 摘要。
 - 写入：更新目标 knowledge 的 `summary`、`evidence`、正文、review 字段和 `bindto`，来源 candidate 变为 rejected 状态；candidate ID 不生成同 ID knowledge 文件。成功写入后 API 自动调用 `kb.index.rebuild`，由索引根据 knowledge `bindto` 派生 knowledge base 成员视图。
 - LLM 辅助：不需要。合并方案和 `bindto` 建议由 Interface 层在 Claude Code review 前生成。
@@ -335,7 +317,6 @@ candidates:
 
 ### `kb.knowledge.reject`
 
-- 输入：candidate/knowledge ID、review 决策、拒绝原因；必选 `entrypoint` 和 `dry_run`。
 - 读取：candidate。
 - 写入：candidate `status: rejected`、`review.reviewed_at`、`review.decision`、`review.reason` 和 `updated`。
 - LLM 辅助：不需要。
@@ -344,7 +325,6 @@ candidates:
 
 ### `kb.knowledge.deprecate`
 
-- 输入：knowledge ID、可选废弃原因；必选 `entrypoint` 和 `dry_run`。
 - 读取：knowledge、knowledgebase 和 source。
 - 写入：knowledge `status: deprecated`、`deprecated_at`、`deprecated_reason` 和 `updated`；成功写入后 API 自动调用 `kb.index.rebuild` 重建派生索引。
 - LLM 辅助：不需要。
@@ -355,7 +335,6 @@ candidates:
 
 ### `kb.knowledgebase.create`
 
-- 输入：初始 draft 阶段接收 `title` 和临时 `input_path`；resume 阶段接收同一 `input_path`、`resume_token` 和 `llm_result`；最终写入阶段接收 `title`、经用户 review 确认后的 `description`、`tags`、`scope`、`default_outline_id`、`outlines` 和 `review.decision: approve`。必选 `entrypoint` 和 `dry_run`，可选 `knowledgebase_id`。
 - 读取：初始阶段读取临时 source-like context、knowledgebase 模板和已有 knowledgebase 摘要。
 - 写入：active knowledgebase Markdown，以及同名 outlines YAML 文件。knowledgebase frontmatter 包含 `id`、`type: knowledge-base`、`title`、`status: active`、`description`、`tags`、`scope`、`default_outline_id`、`outlines_file`、`outlines` manifest、review 字段、`created` 和 `updated`；完整 outline 树写入 `outlines_file` 指向的 YAML 文件。成功写入后 API 自动调用 `kb.index.rebuild` 重建派生索引。
 - LLM 辅助：需要。缺少 reviewed payload 且提供 `input_path` 时，API 返回 `needs_llm`，使用 `knowledgebase-create.md` 生成 draft；resume 后 API 校验 draft 并返回 `needs_review`。
@@ -366,7 +345,6 @@ candidates:
 
 ### `kb.knowledgebase.outline.create`
 
-- 输入：active knowledgebase ID、经用户 review 确认的新 outline；必选 `entrypoint` 和 `dry_run`。
 - 读取：knowledgebase Markdown 和 `outlines_file`。
 - 写入：向 outlines YAML 追加新 outline，并更新 knowledgebase frontmatter 中的 `outlines` manifest 和 `updated`；成功写入后 API 自动调用 `kb.index.rebuild`。
 - Review gate：需要 `review.decision: approve`。
@@ -374,7 +352,6 @@ candidates:
 
 ### `kb.knowledgebase.outline.set_default`
 
-- 输入：active knowledgebase ID、active outline ID；必选 `entrypoint` 和 `dry_run`。
 - 读取：knowledgebase Markdown 和 `outlines_file`。
 - 写入：更新 knowledgebase frontmatter 和 outlines YAML 中的 `default_outline_id`；成功写入后 API 自动调用 `kb.index.rebuild`。
 - Review gate：需要 `review.decision: approve`。
@@ -382,7 +359,6 @@ candidates:
 
 ### `kb.knowledgebase.outline.archive`
 
-- 输入：active knowledgebase ID、非默认 outline ID，必选 `entrypoint` 和 `dry_run`，可选 `allow_existing_bindings`。
 - 读取：knowledgebase Markdown、`outlines_file` 和现有 accepted knowledge 的 `bindto`。
 - 写入：将目标 outline 状态置为 `archived`，并更新 knowledgebase frontmatter 中的 `outlines` manifest；成功写入后 API 自动调用 `kb.index.rebuild`。
 - Review gate：需要 `review.decision: approve`。
@@ -390,7 +366,6 @@ candidates:
 
 ### `kb.knowledgebase.map`
 
-- 输入：必选 `entrypoint` 和 `dry_run`，可选 `knowledgebase_id`、`output_path`。
 - 读取：active knowledgebase 的 `outlines_file`、`default_outline_id` 和 accepted knowledge 的 `bindto`。
 - 写入：临时 Markdown 文件；不写入 repo-tracked index 或对象文件。
 - LLM 辅助：不需要。
@@ -402,7 +377,6 @@ candidates:
 
 ### `kb.note.add`
 
-- 输入：note Markdown 内容，必选 `entrypoint` 和 `dry_run`，可选标题和显式 note ID。
 - 读取：note 模板。
 - 写入：独立 note Markdown。
 - LLM 辅助：可选。用户提供非空 `title` 时可跳过；未提供标题时，Interface 应触发 `note-title.md`，由 Claude Code 生成标题后 resume。
@@ -413,7 +387,6 @@ candidates:
 
 ### `kb.note.get`
 
-- 输入：note ID；必选 `entrypoint` 和 `dry_run`。
 - 读取：note Markdown。
 - 写入：无。
 - LLM 辅助：不需要。
@@ -421,7 +394,6 @@ candidates:
 
 ### `kb.note.deprecate`
 
-- 输入：note ID、废弃原因；必选 `entrypoint` 和 `dry_run`。
 - 读取：note。
 - 写入：note `status: deprecated`、`deprecated_at`、`deprecated_reason` 和 `updated`；将 note 文件移动到 `notes/deprecated/`。
 - LLM 辅助：不需要。
@@ -432,18 +404,14 @@ candidates:
 
 ### `kb.index.rebuild`
 
-- 输入：重建范围 `all | source | candidate | knowledge | knowledgebase | note | review_queue`，必选 `entrypoint` 和 `dry_run`，可选对象 ID。
 - 读取：对象文件、frontmatter、`.meta.yml`、knowledgebase outlines YAML 和 knowledge `bindto`。
-- 写入：目标范围内的派生索引文件；`dry_run` 时不写入，只返回拟更新 diff。
 - LLM 辅助：不需要。
 - Review gate：不需要，因为索引是派生视图，不是事实来源。
 - 输出：重建的索引路径、diff、发现的一致性问题和未修复项；一致性问题必须覆盖无效 `bindto` 和不存在的 outline 节点。
 - 约束：不得把索引内容反向写回对象事实；对象文件和索引冲突时始终以对象文件为准。
-- 调用方式：对象写入 API 会在成功写入后自动调用非 dry-run `kb.index.rebuild`。check workflow 也直接调用非 dry-run `kb.index.rebuild`，用于重建派生索引并返回一致性问题。
 
 ### `kb.clean.inspect`
 
-- 输入：必选 `entrypoint` 和 `dry_run`。
 - 行为：只读扫描当前工作区目录设计和对象字段，对比当前版本预期。
 - LLM 辅助：存在差异时返回 `needs_llm`，Claude Code 根据差异生成迁移计划。
 - 输出差异：缺失目录、字段 schema drift、状态 drift、路径迁移和冲突风险；只检查当前新设计预期，不承担旧设计迁移。

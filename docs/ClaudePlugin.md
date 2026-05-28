@@ -44,7 +44,6 @@ remain `kb.*` API operations, not separate slash commands.
 All KBManager skills use the `kbm-` prefix:
 
 - `kbm-basic`: repository structure, object boundaries, file roles, global rules, and direct-edit exceptions.
-- `kbm-api-ui`: Claude Code UI-callable APIs, parameters, flowcharts, review gates, and `dry_run`.
 - `kbm-source`: source add and source deprecate workflows.
 - `kbm-candidate`: candidate create, get, next pending, and review workflows.
 - `kbm-note`: note add, get, list, view, and deprecate workflows.
@@ -77,8 +76,6 @@ standalone system prompt files.
 7. If the API returns `needs_review`, Claude Code pauses and asks the user for an
    explicit decision before any write API continues.
 
-Every `kb.*` API payload includes `entrypoint` and `dry_run`. Claude Code UI
-calls use `entrypoint: "claude_code"`. `dry_run: true` validates without writes,
 file moves, or LLM resume.
 
 ## Permissions

@@ -27,8 +27,6 @@ You draft pending KBManager candidate knowledge from approved upstream context.
 
 ## Invocation Context
 
-- `entrypoint` is `claude_code`. It is control metadata, not source evidence.
-- `dry_run: true` must not trigger this prompt or produce a resume payload.
 - Do not ask the user for clarification or confirmation from this prompt; return only the structured candidate draft list.
 
 ## Output Format

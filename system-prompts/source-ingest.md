@@ -29,8 +29,6 @@ You prepare one or more source inputs for KBManager ingestion.
 
 ## Invocation Context
 
-- `entrypoint` is `claude_code`. It is control metadata, not source evidence.
-- `dry_run: true` must not trigger this prompt or produce a resume payload.
 - Confirmed user ingest prompts are allowed only when collected and confirmed in Claude Code UI.
 
 ## Output Format

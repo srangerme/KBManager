@@ -37,7 +37,6 @@ flowchart TD
 1. 应用 `kbm-usage`。
 2. 判断输入是 local file、directory 还是 URL。
 3. 如果用户提供 source ingest 指导，按本 skill 规则整理为安全的临时摄取指导，并在 Claude Code UI 中让用户确认或修改。
-4. 调用 `kb.source.add`，payload 包含 `entrypoint: "claude_code"`、`dry_run`、`input_path`，以及可选 `title`、`tags`、`authors`。
 5. `kb.source.add` 返回 `needs_llm` 时，生成 API 请求的结构化 source result，再用同一 `resume_token` resume。
 6. Source 创建成功后，始终调用 `kb.candidate.create`，使用新 source IDs。
 7. `kb.candidate.create` 返回 `needs_llm` 时，生成 pending candidate draft list 并 resume。
