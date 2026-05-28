@@ -1,6 +1,6 @@
 ---
 name: kbm-download-paper-pdf
-description: 当用户给出 paper title、DOI、URL、arXiv ID、PMCID、论文信息、citation、bibtex 或网页链接，并要求查找、获取、下载、保存、合法下载、open access PDF、OA PDF、论文 PDF、download paper PDF、fetch paper pdf、paper pdf download，或要求把论文 PDF 下载到 /tmp/kbm-downloads 时使用此 skill。此 skill 只使用无需邮箱、API key、登录、VPN、library proxy 或人工请求的合法公开来源。
+description: 根据论文标题、DOI、URL、arXiv ID、PMCID、citation 或 BibTeX 查找并下载合法公开 PDF。仅使用无需登录、API key、邮箱、VPN、代理或人工请求的来源。
 ---
 
 # KBManager Download Paper PDF

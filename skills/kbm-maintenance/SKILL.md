@@ -1,6 +1,6 @@
 ---
 name: kbm-maintenance
-description: 当用户要求初始化、检查、校验、重建、清理、迁移、修复 KBManager workspace/repository/index/layout/schema/object state，或调用 kb.init、kb.index.rebuild、kb.clean.inspect，或执行 init/check/consistency check/index rebuild/rebuild indexes/clean inspect/clean/migrate/migration plan/clean migration/schema migration/layout drift/repair derived indexes/validate object paths/验证索引/一致性检查时使用此 skill。此 skill 覆盖 maintenance workflows 和已批准 migration execution，不覆盖普通对象内容编辑。
+description: 初始化、检查、重建索引、检查 layout/schema drift，或执行已批准的 clean migration。仅覆盖 workspace 维护，不处理普通对象内容编辑。
 ---
 
 # KBManager Maintenance Workflows

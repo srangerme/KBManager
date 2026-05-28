@@ -1,6 +1,6 @@
 ---
 name: kbm-research-on
-description: 当用户想要基于现有 KBManager knowledgebase/KB definition/scope/outline 生成 ChatGPT Deep Research prompt、research prompt、research brief、研究任务、继续研究、外部调研指令，或说“基于这个知识库研究”“continue research”“generate Deep Research prompt”“make a research brief”“把 KB scope/outline 转成研究计划”时使用此 skill。此 skill 只读读取 knowledgebase，不写入 KBManager objects，不调用 write APIs。
+description: 基于现有 KBManager knowledgebase、scope 和 outline 生成 ChatGPT Deep Research prompt 或 research brief。只读使用，不写入对象或调用 write API。
 ---
 
 # KBManager Research On

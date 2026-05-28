@@ -1,6 +1,6 @@
 ---
 name: kbm-kb
-description: 当用户要求创建、定义、查看、列出、映射、维护、组织或调整 knowledgebase/knowledge base/KB/知识库，以及 title/description/tags/scope/includes/excludes/default outline/outlines/knowledge map/kb map/section tree/taxonomy/目录结构/大纲/节点/bindings 时使用此 skill。覆盖 kb.knowledgebase.create、kb.knowledgebase.map、kb.knowledgebase.outline.create、kb.knowledgebase.outline.set_default、kb.knowledgebase.outline.archive、knowledgebase list/view、outline create/set default/archive/edit/update/reorder/rename/move/split/merge YAML nodes、outline binding repair、bindto risks、node IDs、section hierarchy、taxonomy changes。创建 KB 时 source/file/directory 只是临时定义上下文，不触发 source add 或 candidate create。
+description: 创建、查看、映射或维护 KBManager knowledgebase 与 outline，包括 scope、tags、default outline、taxonomy nodes 和 outline YAML edits。仅作为 KB 定义上下文的材料不触发 source 摄取。
 ---
 
 # KBManager Knowledgebase And Outline Workflows

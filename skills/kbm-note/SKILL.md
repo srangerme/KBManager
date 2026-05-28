@@ -1,6 +1,6 @@
 ---
 name: kbm-note
-description: 当用户要求 add/capture/save/record/write/get/list/view/show/open/title/deprecate note，或记录想法、备忘、观察、scratch note、personal note、工作记录、临时笔记，或调用 kb.note.add、kb.note.get、kb.note.deprecate、note title generation、note list、note view、deprecated note display、废弃笔记、查看笔记、列出笔记时使用此 skill。此 skill 覆盖 note 生命周期；涉及 notes 但不把 notes 作为 source evidence、candidate creation input 或正式 knowledge evidence。
+description: 添加、命名、列出、查看或废弃 KBManager note，用于个人观察、临时笔记和工作记录。Note 不作为 source evidence、candidate input 或正式 knowledge evidence。
 ---
 
 # KBManager Note Workflows

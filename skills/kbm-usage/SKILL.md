@@ -1,6 +1,6 @@
 ---
 name: kbm-usage
-description: 任何 KBManager、/kbm:ask、kb.* API、scripts/kbmanager_plugin.py、workspace、repository、object file、Markdown/YAML/PDF data、source/candidate/knowledge/note/knowledgebase、safe write、read-only view、direct edit、review gate、API payload、JSON result、needs_llm、resume_token、needs_review、review options、operation IDs、warnings/errors/diffs/next_actions、evidence、derived index、delete/deprecate/archive、clean migration、outline YAML exception、对象边界、事实来源、索引、删除、废弃、审核、写入边界、数据目录、状态机、权限或“能不能直接改文件/怎么调用 API”问题都应先使用此 skill。所有领域 workflow 在 API 调用、object writes、file edits、migration 或判断读写边界前触发。
+description: KBManager 通用规则：API 调用、对象边界、安全写入、review gate、evidence、derived index 和 direct-edit 例外。任何可能读写 KBManager 状态的领域 workflow 前先读取。
 ---
 
 # KBManager Usage

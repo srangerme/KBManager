@@ -1,6 +1,6 @@
 ---
 name: kbm-candidate
-description: 当用户要求创建、生成、查看、列出、获取、审核、处理、接受、拒绝、延后、合并、废弃 candidate/pending candidate/review item/候选知识/待审核知识/atomic knowledge/knowledge review，或调用 kb.candidate.create、kb.candidate.get、kb.candidate.next_pending、kb.candidate.defer、kb.knowledge.accept、kb.knowledge.reject、kb.knowledge.merge、kb.knowledge.deprecate，或处理 accept/reject/defer/merge/approve/revise/reviewed payload/evidence/bindto/outline suggestions/pending queue/accepted knowledge/deprecated knowledge 时使用此 skill。此 skill 覆盖 candidate 生命周期和由 candidate review 产生的 knowledge 生命周期动作。
+description: 创建、查看、排队、审核、接受、拒绝、延后、合并或废弃 KBManager candidates 与 accepted knowledge。覆盖 candidate review 决策及其产生的 knowledge 生命周期动作。
 ---
 
 # KBManager Candidate And Knowledge Review Workflows

@@ -1,6 +1,6 @@
 ---
 name: kbm-source
-description: 当用户要求添加、导入、摄取、登记、附加、保存、录入、更新状态或废弃 KBManager source/source material/source file/source directory/source PDF/source Markdown/原始材料/研究材料/文件夹，或要求 ingest/import/add source、kb.source.add、kb.source.deprecate、source ingestion、PDF ingest、directory ingest、从外部材料生成 pending candidates、把材料转为候选知识时使用此 skill。若用户是在创建 knowledgebase/KB definition 时提供 source/file/directory 作为临时上下文，改用 kbm-kb 而不是 source lifecycle。
+description: 添加或废弃 KBManager source，包括本地文件、目录、PDF、Markdown 摄取，并在摄取后创建 pending candidates。创建 knowledgebase 时提供的临时材料上下文不使用此 skill。
 ---
 
 # KBManager Source Workflows
