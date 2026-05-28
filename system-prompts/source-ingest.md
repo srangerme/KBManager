@@ -25,7 +25,7 @@ You prepare one or more source inputs for KBManager ingestion.
 - Do not invent facts that are not present in the provided source.
 - Preserve enough traceability for later human review.
 - Treat the provided source content as the only factual source. API context and confirmed Claude Code UI user ingest prompts may guide focus, priority, and formatting, but they are not evidence.
-- Do not perform independent URL fetching, browser automation, PDF export, Markdown capture, scraping, or retry acquisition. Use only source content already provided by KBManager.
+- Use only source content already provided by KBManager.
 
 ## Invocation Context
 

@@ -14,7 +14,6 @@ def test_resolves_known_object_paths(tmp_path: Path) -> None:
 
     assert paths.source_markdown("source-1.md") == tmp_path / "data/raw/md/source-1.md"
     assert paths.source_pdf("source-1.pdf") == tmp_path / "data/raw/pdf/source-1.pdf"
-    assert paths.source_html("source-1.html") == tmp_path / "data/raw/html/source-1.html"
     assert paths.candidate("knowledge-1.md") == tmp_path / "candidates/pending/knowledge-1.md"
     assert (
         paths.candidate(

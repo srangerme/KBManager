@@ -349,20 +349,6 @@ def test_scans_pdf_sidecar_metadata(
     assert ids["source-1"] == [workspace.root / "data/raw/pdf/example.meta.yml"]
 
 
-def test_scans_html_sidecar_metadata(
-    repository: ObjectRepository,
-    workspace: Workspace,
-) -> None:
-    html = workspace.ensure_parent("data/raw/html/example.html")
-    html.write_text("<html><body>source</body></html>", encoding="utf-8")
-    repository.write_meta("data/raw/html/example.html", {**metadata(), "source_type": "url"})
-
-    ids = repository.scan_object_ids()
-
-    assert list(ids) == ["source-1"]
-    assert ids["source-1"] == [workspace.root / "data/raw/html/example.meta.yml"]
-
-
 def test_pdf_source_without_sidecar_meta_fails_scan(
     repository: ObjectRepository,
     workspace: Workspace,

@@ -9,7 +9,7 @@ description: 理解 KBManager 请求并编排正确的 API 工作流
 
 ## 必需 Skills
 
-- 所有 KBManager 请求都先使用 `kbm-usage` 获取全局对象、写入、审核、来源、URL、索引、API payload/result 和 helper 调用规则。
+- 所有 KBManager 请求都先使用 `kbm-usage` 获取全局对象、写入、审核、来源、索引、API payload/result 和 helper 调用规则。
 - 根据用户意图使用匹配领域 skill：
   `kbm-source`, `kbm-candidate`, `kbm-note`, `kbm-kb`, `kbm-maintenance`。
 - 从 knowledgebase 生成 ChatGPT Deep Research prompt 时，使用 `kbm-research-on`。
@@ -17,7 +17,7 @@ description: 理解 KBManager 请求并编排正确的 API 工作流
 
 ## Intent Routing
 
-- Source lifecycle：添加、导入、摄取、登记、废弃 source，URL/PDF/HTML/Markdown/file/directory source，或从材料生成 pending candidates，使用 `kbm-source`。
+- Source lifecycle：添加、导入、摄取、登记、废弃 source，PDF/Markdown/file/directory source，或从材料生成 pending candidates，使用 `kbm-source`。
 - Candidate and knowledge review：创建 candidate、获取 candidate、下一个 pending、审核、accept/reject/defer/merge candidate、deprecate accepted knowledge、处理 evidence 或 bindto，使用 `kbm-candidate`。
 - Notes：添加、记录、保存、生成标题、查看、列出、废弃 note，使用 `kbm-note`。
 - Knowledgebase and outline：创建/列出/map knowledgebase，创建/set default/archive outline，维护 outline YAML nodes，修复 outline bindings，使用 `kbm-kb`。
@@ -35,8 +35,7 @@ description: 理解 KBManager 请求并编排正确的 API 工作流
 - 不要物理删除 source、note、candidate、knowledge 或 knowledgebase objects。使用 deprecate、reject、defer 或 archive 语义。
 - 如果 API 返回 `needs_llm`，生成 API 请求的结构化输出，并使用同一个 `resume_token` 恢复同一操作。
 - 如果 API 返回 `needs_review`，在 Claude Code UI 中暂停并收集明确的用户决定，然后再调用写入 API。
-- 对 URL source input，不要在 Claude Code 中 fetch、browse、export、scrape、save 或 retry 该 URL。将原始 URL 传给 `kb.source.add`。
-- 创建 knowledgebase 时用户提供的 source/file/URL 只是 source-like context；不要调用 `kb.source.add`，不要创建 candidate，也不要把该 input 写成 evidence。
+- 创建 knowledgebase 时用户提供的 source/file/directory 只是 source-like context；不要调用 `kb.source.add`，不要创建 candidate，也不要把该 input 写成 evidence。
 
 ## Helper Invocation
 

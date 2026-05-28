@@ -1,6 +1,6 @@
 # 个人 AI 中台
 
-一个纯 Markdown/PDF/HTML/YAML 文件系统版的个人 AI 知识中台。
+一个纯 Markdown/PDF/YAML 文件系统版的个人 AI 知识中台。
 
 KBManager 不依赖数据库、RAG、向量库或全文搜索服务。用户在自己的 git
 工作区中使用 KBManager，所有 source、note、candidate、knowledge、

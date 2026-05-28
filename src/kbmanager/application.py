@@ -14,8 +14,6 @@ from datetime import date, datetime
 from html import escape
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
-from urllib.request import Request, urlopen
 
 import yaml
 
@@ -50,11 +48,8 @@ CLEAN_INSPECT_OPERATION = "kb.clean.inspect"
 INIT_DIRECTORIES = (
     "data/raw/md",
     "data/raw/pdf",
-    "data/raw/html",
     "data/cleaned",
     "data/attachments",
-    "data/attachments/url-captures",
-    "data/failed",
     "candidates/pending",
     "candidates/rejected",
     "candidates/deferred",
@@ -142,17 +137,13 @@ class ObjectRecord:
 
 @dataclass(frozen=True)
 class SourceInput:
-    path: Path | None
+    path: Path
     relative_path: str
     source_kind: str
     title_hint: str
-    content: str | None = None
-    original_url: str | None = None
 
 
 SUPPORTED_SOURCE_SUFFIXES = {".md", ".pdf"}
-SUPPORTED_SOURCE_URL_SCHEMES = {"http", "https"}
-MAX_URL_DOWNLOAD_BYTES = 5 * 1024 * 1024
 ID_RE = re.compile(r"^[a-z]+-\d{8}-\d{3}(?:-[^\W_]+(?:-[^\W_]+)*)?$")
 INDEX_SCOPES = {
     "all",
@@ -252,23 +243,19 @@ def source_add(
 ) -> ApiResult:
     """Add a local Markdown/PDF source through the source-ingest LLM boundary."""
 
-    input_text = str(input_path)
     try:
         workspace = Workspace(root)
         _validate_source_add_input(title=title, tags=tags, authors=authors)
         source_inputs = _source_inputs(workspace, input_path)
-        input_ref = (
-            str(input_path) if _is_supported_source_url(input_text) else str(Path(input_path))
-        )
         token_payload = {
-            "input_path": input_ref,
+            "input_path": str(Path(input_path)),
             "inputs": [source.relative_path for source in source_inputs],
             "title": title,
             "tags": tags or [],
             "authors": authors or [],
         }
     except (KBManagerError, OSError) as exc:
-        suggestion, next_actions = _source_add_input_failure_recovery(input_text)
+        suggestion, next_actions = _source_add_input_failure_recovery()
         return ApiResult.failed(
             SOURCE_ADD_OPERATION,
             "invalid_input",
@@ -2650,13 +2637,6 @@ def _knowledgebase_create_input_context(
     input_path: str | Path,
 ) -> dict[str, Any]:
     input_text = str(input_path)
-    if _is_supported_source_url(input_text):
-        return {
-            "input_path": input_text,
-            "input_kind": "url",
-            "content": _download_url_as_html(input_text),
-        }
-
     resolved = _resolve_external_input(workspace.root, input_path)
     if resolved.is_file():
         return {
@@ -3034,7 +3014,6 @@ def _candidate_source_context(
             "title": metadata.get("title"),
             "summary": metadata.get("summary"),
             "tags": metadata.get("tags", []),
-            "source_url": metadata.get("source_url"),
             "cleaned": metadata.get("cleaned", {}),
         }
         cleaned_path = _cleaned_path_from_source_metadata(metadata)
@@ -3320,7 +3299,6 @@ def _clean_object_schemas() -> dict[str, dict[str, set[str]]]:
                 "deprecated_at",
                 "deprecated_reason",
                 "tags",
-                "source_url",
             },
         },
         "candidate": {
@@ -3590,45 +3568,6 @@ def _resume_token(operation: str, payload: dict[str, Any]) -> str:
 
 
 def _source_inputs(workspace: Workspace, input_path: str | Path) -> list[SourceInput]:
-    input_text = str(input_path)
-    if _is_supported_source_url(input_text):
-        try:
-            html = _download_url_as_html(input_text)
-        except RepositoryError as direct_error:
-            try:
-                pdf_path = _download_url_as_pdf_with_playwright(workspace, input_text)
-            except RepositoryError as playwright_error:
-                report_path = _write_url_download_failure_report(
-                    workspace,
-                    input_text,
-                    direct_error=direct_error,
-                    playwright_error=playwright_error,
-                )
-                raise RepositoryError(
-                    "URL acquisition failed; direct URL download and Playwright PDF "
-                    f"export both failed. Failure report: {report_path}. "
-                    f"Direct download error: {direct_error}. "
-                    f"Playwright PDF export error: {playwright_error}"
-                ) from playwright_error
-            return [
-                SourceInput(
-                    path=pdf_path,
-                    relative_path=str(workspace.relative(pdf_path)),
-                    source_kind="url_pdf",
-                    title_hint=_title_hint_for_url(input_text),
-                    original_url=input_text,
-                )
-            ]
-        return [
-            SourceInput(
-                path=None,
-                relative_path=input_text,
-                source_kind="url",
-                title_hint=_title_hint_for_url(input_text),
-                content=html,
-            )
-        ]
-
     resolved = _resolve_local_source_input(workspace, input_path)
     if resolved.is_file():
         return [
@@ -3675,11 +3614,7 @@ def _source_input_reference(workspace: Workspace, path: Path) -> str:
 
 
 def _source_context_documents(source_inputs: list[SourceInput]) -> list[dict[str, str]]:
-    return [
-        {"input_path": source.relative_path, "content": source.content}
-        for source in source_inputs
-        if source.content is not None
-    ]
+    return []
 
 
 def _validate_source_input(path: Path) -> str:
@@ -3691,152 +3626,12 @@ def _validate_source_input(path: Path) -> str:
     return "markdown" if suffix == ".md" else "pdf"
 
 
-def _is_supported_source_url(value: str) -> bool:
-    parsed = urlparse(value)
-    return parsed.scheme in SUPPORTED_SOURCE_URL_SCHEMES and bool(parsed.netloc)
-
-
-def _title_hint_for_url(value: str) -> str:
-    parsed = urlparse(value)
-    path_name = Path(parsed.path).stem
-    return path_name or parsed.netloc
-
-
-def _source_add_input_failure_recovery(input_text: str) -> tuple[str, list[str]]:
-    if not _is_supported_source_url(input_text):
-        return (
-            "Provide a readable .md or .pdf file from the local filesystem, "
-            "or an accessible HTTP(S) URL. KBManager writes managed objects only "
-            "inside the workspace.",
-            [],
-        )
+def _source_add_input_failure_recovery() -> tuple[str, list[str]]:
     return (
-        "Direct URL download and Playwright PDF export failed. The URL was not added as "
-        "a source; check data/failed for the captured error report, then manually "
-        "download the page as a local PDF or Markdown file if needed.",
-        [
-            "Review the matching report under data/failed.",
-            "If you still need this page, manually export/print/save it as PDF.",
-            "Retry kb.source.add with the captured local file path.",
-        ],
+        "Provide a readable .md or .pdf file from the local filesystem. KBManager writes "
+        "managed objects only inside the workspace.",
+        [],
     )
-
-
-def _download_url_as_html(url: str) -> str:
-    request = Request(url, headers={"User-Agent": "KBManager/0.1"})
-    try:
-        with urlopen(request, timeout=20) as response:
-            content_type = response.headers.get_content_type()
-            if not (
-                content_type == "text/html"
-                or content_type == "application/xhtml+xml"
-                or content_type.startswith("text/")
-            ):
-                raise RepositoryError(f"unsupported URL content type: {content_type}")
-            raw = response.read(MAX_URL_DOWNLOAD_BYTES + 1)
-            if len(raw) > MAX_URL_DOWNLOAD_BYTES:
-                raise RepositoryError(
-                    f"URL content exceeds maximum size of {MAX_URL_DOWNLOAD_BYTES} bytes"
-                )
-            charset = response.headers.get_content_charset() or "utf-8"
-    except RepositoryError:
-        raise
-    except OSError as exc:
-        raise RepositoryError(f"could not download URL source: {url}: {exc}") from exc
-
-    text = raw.decode(charset, errors="replace")
-    if not text.strip():
-        raise RepositoryError(f"downloaded URL source is empty: {url}")
-    if content_type in {"text/html", "application/xhtml+xml"}:
-        return text
-    escaped = escape(text)
-    return (
-        "<!doctype html>\n"
-        "<html>\n"
-        "<head>\n"
-        f'  <meta charset="{escape(charset, quote=True)}">\n'
-        f"  <title>{escape(url)}</title>\n"
-        "</head>\n"
-        "<body>\n"
-        f"  <pre>{escaped}</pre>\n"
-        "</body>\n"
-        "</html>\n"
-    )
-
-
-def _download_url_as_pdf_with_playwright(workspace: Workspace, url: str) -> Path:
-    target = workspace.ensure_parent(_url_capture_pdf_relative(url))
-    if target.exists():
-        return target
-    return _download_url_as_pdf_to_path(url, target)
-
-
-def _download_url_as_temporary_pdf(url: str) -> Path:
-    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
-    target_dir = Path(tempfile.mkdtemp(prefix="kbmanager-kb-init-"))
-    target = target_dir / f"{digest}.pdf"
-    return _download_url_as_pdf_to_path(url, target)
-
-
-def _download_url_as_pdf_to_path(url: str, target: Path) -> Path:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        from playwright.sync_api import Error as PlaywrightError
-        from playwright.sync_api import sync_playwright
-    except ImportError as exc:
-        raise RepositoryError(
-            "Playwright is not installed; install the Python playwright package and browser "
-            "runtime to enable URL PDF export fallback"
-        ) from exc
-
-    try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            try:
-                page = browser.new_page()
-                page.goto(url, wait_until="networkidle", timeout=30_000)
-                page.pdf(path=str(target), print_background=True, prefer_css_page_size=True)
-            finally:
-                browser.close()
-    except (PlaywrightError, OSError) as exc:
-        target.unlink(missing_ok=True)
-        raise RepositoryError(f"could not export URL as PDF with Playwright: {url}: {exc}") from exc
-
-    if not target.exists() or target.stat().st_size == 0:
-        target.unlink(missing_ok=True)
-        raise RepositoryError(f"Playwright PDF export produced an empty file: {url}")
-    return target
-
-
-def _url_capture_pdf_relative(url: str) -> str:
-    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
-    return f"data/attachments/url-captures/{digest}.pdf"
-
-
-def _write_url_download_failure_report(
-    workspace: Workspace,
-    url: str,
-    *,
-    direct_error: Exception,
-    playwright_error: Exception,
-) -> str:
-    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
-    stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
-    relative_path = f"data/failed/url-{digest}-{stamp}.json"
-    report_path = workspace.ensure_parent(relative_path)
-    report = {
-        "url": url,
-        "failed_at": _today(),
-        "direct_download_error": str(direct_error),
-        "playwright_pdf_error": str(playwright_error),
-        "source_added": False,
-        "next_actions": [
-            "Manually download or print the page as PDF if it is still needed.",
-            "Run kb.source.add again with the local PDF or Markdown file path.",
-        ],
-    }
-    _write_new_text_atomic(report_path, json.dumps(report, ensure_ascii=False, indent=2) + "\n")
-    return relative_path
 
 
 def _validate_source_add_input(
@@ -3944,9 +3739,7 @@ def _plan_source_records(
         cleaned_relative = f"data/cleaned/{source_id}.md"
         source_relative = (
             f"data/raw/pdf/{source_id}.pdf"
-            if source_input.source_kind in {"pdf", "url_pdf"}
-            else f"data/raw/html/{source_id}.html"
-            if source_input.source_kind == "url"
+            if source_input.source_kind == "pdf"
             else f"data/raw/md/{source_id}.md"
         )
         metadata = {
@@ -3972,8 +3765,6 @@ def _plan_source_records(
             "created": today,
             "updated": today,
         }
-        if source_input.original_url is not None:
-            metadata["source_url"] = source_input.original_url
         records.append(
             {
                 "source_id": source_id,
@@ -4002,27 +3793,15 @@ def _write_source_records_atomic(
             created.append(cleaned_path)
 
             if source_input.source_kind == "markdown":
-                if source_input.path is None:
-                    raise RepositoryError("markdown source input is missing a local path")
                 original = source_input.path.read_text(encoding="utf-8")
                 path = repository.write_markdown(
                     record["source_relative"],
                     MarkdownDocument(frontmatter=metadata, body=f"\n## Source\n\n{original}"),
                 )
                 created.append(path)
-            elif source_input.source_kind in {"pdf", "url_pdf"}:
-                if source_input.path is None:
-                    raise RepositoryError("PDF source input is missing a local path")
+            else:
                 target = workspace.ensure_parent(record["source_relative"])
                 _copy_new_file_atomic(source_input.path, target)
-                created.append(target)
-                repository.write_meta(record["source_relative"], metadata)
-                created.append(target.with_suffix(".meta.yml"))
-            else:
-                if source_input.content is None:
-                    raise RepositoryError("URL source input is missing downloaded content")
-                target = workspace.ensure_parent(record["source_relative"])
-                _write_new_text_atomic(target, source_input.content)
                 created.append(target)
                 repository.write_meta(record["source_relative"], metadata)
                 created.append(target.with_suffix(".meta.yml"))

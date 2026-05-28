@@ -51,7 +51,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  A["(user) source file/path/url"] --> B{"(ask) 是否带 user_prompt"}
+  A["(user) source file/path"] --> B{"(ask) 是否带 user_prompt"}
   B -- 是 --> C["(ask) 按 source skill 规则整理 prompt fragment"]
   C --> D["(user) 确认或修改 prompt fragment"]
   D --> E["(api) kb.source.add"]

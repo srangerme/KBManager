@@ -20,8 +20,6 @@ def test_init_creates_workspace_structure_and_indexes(
     assert result.to_dict()["status"] == "success"
     for directory in INIT_DIRECTORIES:
         assert (tmp_path / directory).is_dir()
-    assert (tmp_path / "data/failed").is_dir()
-    assert (tmp_path / "data/attachments/url-captures").is_dir()
     for placeholder in application.INIT_DIRECTORY_PLACEHOLDER_FILES:
         path = tmp_path / placeholder
         assert path.is_file()

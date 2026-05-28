@@ -19,9 +19,6 @@ class ObjectPaths:
     def source_pdf(self, filename: str) -> Path:
         return self._resolve_file("data/raw/pdf", filename, ".pdf")
 
-    def source_html(self, filename: str) -> Path:
-        return self._resolve_file("data/raw/html", filename, ".html")
-
     def candidate(self, filename: str, status: str = "pending") -> Path:
         if status not in {"pending", "rejected", "deferred"}:
             raise RepositoryError(f"unsupported candidate status: {status}")

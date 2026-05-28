@@ -32,7 +32,6 @@ REQUIRED_OBJECT_FIELDS = ("id", "type", "title", "status", "created", "updated")
 OBJECT_METADATA_ROOTS = (
     "data/raw/md",
     "data/raw/pdf",
-    "data/raw/html",
     "candidates",
     "knowledge",
     "notes",
@@ -124,7 +123,7 @@ class ObjectRepository:
                     document = self.parse_markdown(self._read_text(path), source=str(path))
                     self.validate_required_fields(document.frontmatter, source=str(path))
                     records.append(self._metadata_record(path, document.frontmatter))
-                elif path.suffix.lower() in {".pdf", ".html"}:
+                elif path.suffix.lower() == ".pdf":
                     meta_path = self._meta_path(path)
                     if not meta_path.exists():
                         raise RepositoryError(f"raw source has no sidecar metadata: {path}")
@@ -229,7 +228,7 @@ class ObjectRepository:
 
     @staticmethod
     def _resource_for_meta_path(meta_path: Path) -> Path:
-        if meta_path.parent.name in {"pdf", "html"}:
+        if meta_path.parent.name == "pdf":
             suffix = f".{meta_path.parent.name}"
             return meta_path.with_name(meta_path.name.removesuffix(".meta.yml") + suffix)
         return meta_path.with_name(meta_path.name.removesuffix(".meta.yml"))

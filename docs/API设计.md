@@ -62,7 +62,7 @@ next_actions: []
 
 - API 必须返回结构化错误。
 - `request_id`、`actor`、`context.trace_id` 等 envelope 字段可由 Interface、脚本或未来 server 层用于审计和追踪；当前公开 API 不要求这些字段，也不把它们写入对象事实。
-- `needs_llm` 响应不得产生对象写入、状态变更或文件移动。采集类 API 可以在返回 `failed` 时写入诊断性失败报告，例如 `kb.source.add` 的 URL 采集失败报告写入 `data/failed/`；该失败报告不是 source、candidate、knowledge、knowledge base 或 note 对象，也不得被索引当作事实来源。
+- `needs_llm` 响应不得产生对象写入、状态变更或文件移动。
 - `needs_review` 响应不得产生任何对象写入、状态变更或文件移动。
 - 对象引用统一使用 ID。pending/deferred/rejected candidate 使用全局 knowledge ID；candidate 被 accept 后，原 candidate 文件被原子提升/迁移为正式 knowledge 文件，同一 ID 不得同时存在 candidate 文件和 knowledge 文件。
 
@@ -202,7 +202,7 @@ API 收到 `llm_result` 后必须校验：
 - 读取：KBManager 发布包中的默认目录清单和模板文件。
 - 写入：在目标目录创建受控工作区目录结构、`indexes/`、必要的空索引占位文件，以及每个初始化目录下的空 `KBM.ignore`；对象模板保留为 KBManager 发布包内的系统资源，不写入用户工作区。
 - 默认创建路径：
-  - `data/raw/md/`、`data/raw/pdf/`、`data/raw/html/`、`data/cleaned/`、`data/attachments/`、`data/attachments/url-captures/`、`data/failed/`
+  - `data/raw/md/`、`data/raw/pdf/`、`data/cleaned/`、`data/attachments/`
   - `candidates/pending/`、`candidates/rejected/`、`candidates/deferred/`
   - `knowledge/atomic/`、`knowledge/bases/`
   - `notes/active/`、`notes/deprecated/`
@@ -219,10 +219,10 @@ API 收到 `llm_result` 后必须校验：
 ### `kb.source.add`
 
 - 读取：source 模板和输入资源。
-- 写入：source 对象字段 `id`、`type: source`、`title`、`source_type`、`status: raw`、`path`、`summary`、`cleaned`、`deprecated_at`、`deprecated_reason`、`tags`、`created`、`updated`；URL 直连成功时原文保存为 `data/raw/html/*.html` + `.meta.yml`，URL 直连失败但 Playwright PDF 导出成功时保存为 `data/raw/pdf/*.pdf` + `.meta.yml`，PDF 原文保存为 `data/raw/pdf/*.pdf` + `.meta.yml`，Markdown 原文保存为 `data/raw/md/*.md`。
+- 写入：source 对象字段 `id`、`type: source`、`title`、`source_type`、`status: raw`、`path`、`summary`、`cleaned`、`deprecated_at`、`deprecated_reason`、`tags`、`created`、`updated`；PDF 原文保存为 `data/raw/pdf/*.pdf` + `.meta.yml`，Markdown 原文保存为 `data/raw/md/*.md`。
 - LLM 辅助：必需。API 固定返回 `needs_llm`，由 Claude Code 在同一次 LLM 调用中生成 source `summary`、`tags` 和 `cleaned_content` 后 resume。
 - Interface 可在调用 `kb.source.add` 前处理可选临时 `user_prompt`：先由 LLM 重写为安全 prompt fragment，经用户确认后追加到 source ingest LLM 请求。该临时 prompt 不属于 `kb.source.add` 的持久化参数，也不得改变 API 的校验和写入语义。
-- 校验：本地路径可读或 URL 可采集、类型支持、元数据事实来源唯一；`summary` 非空；`tags` 必须是字符串列表，空值用 `[]`；`cleaned_content` 可追溯原始资源；LLM 不得覆盖事实字段。workspace 边界只限制 KBManager 对象和派生文件的写入位置，不限制本地 source 输入文件的读取位置。URL 采集完全由 API 负责：先直连下载，失败后尝试 Playwright 打印导出 PDF；若两者都失败，API 返回 `failed`，不创建 source，不返回 `needs_llm`，并将错误汇总写入 `data/failed/` 作为诊断性失败报告。Interface / Claude Code 不得自行下载、浏览器导出、抓取、保存 Markdown 或用本地文件路径重试 URL。
+- 校验：本地路径可读、类型支持、元数据事实来源唯一；`summary` 非空；`tags` 必须是字符串列表，空值用 `[]`；`cleaned_content` 可追溯原始资源；LLM 不得覆盖事实字段。workspace 边界只限制 KBManager 对象和派生文件的写入位置，不限制本地 source 输入文件的读取位置。
 - LLM 结果结构：单文件输入时 `llm_result` 必须包含 `input_path`、非空 `summary`、`tags` 字符串列表和非空 `cleaned_content`；`cleaned_content` 必须包含请求的 `input_path`。目录输入产生多个 source 时，`llm_result.sources` 必须与请求的每个输入路径一一对应，每项都必须包含 `input_path`、非空 `summary`、`tags` 和非空 `cleaned_content`。
 - 输出：source ID、source `summary`、`tags`、source 内的 cleaned 派生字段引用、原始资源引用。
 
