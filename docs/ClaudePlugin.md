@@ -51,6 +51,7 @@ All KBManager skills use the `kbm-` prefix:
 - `kbm-kb-outline`: outline create, set-default, archive, and explicit controlled outline YAML update workflows.
 - `kbm-maintenance`: init, check, clean inspect, and clean migration workflows.
 - `kbm-research-on`: generate a Deep Research prompt from a knowledgebase.
+- `kbm-download-paper-pdf`: find and download legal public paper PDFs to `/tmp/kbm-downloads` without using credentials, login, library access, or paywall bypasses.
 
 Internal LLM steps such as source ingest, candidate creation, note title
 generation, clean migration planning, and knowledgebase drafting remain

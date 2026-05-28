@@ -103,6 +103,10 @@ When a write API succeeds and rebuilds indexes, it may include:
 
 - 当 API 返回 `status: "needs_llm"`，按 API result 中的请求生成结构化 `llm_result`。
 - 使用同一个 `resume_token` 恢复同一个 operation。
+- `resume_token` 是无状态确定性签名，不是持久化会话凭证：API 按 `operation` 和当时的 token payload 生成 token，resume 时按当前请求/当前 repository context 重算后做字符串相等校验。
+- Resume 时必须原样保留首次 `needs_llm` 调用的 operation 和输入参数；不要改写 `input_path` 字符串、`title`、`tags`/`authors` 顺序、`source_ids` 顺序、`content`、`note_id` 或 `knowledgebase_id`。
+- 在 `kb.candidate.create` 和 `kb.knowledgebase.create` 的 LLM/resume 间隙，不要修改会进入 token payload 的 repository context 或 input files；active knowledgebase、outline、source metadata/body、cleaned content、knowledgebase create input 文件/目录内容变化都会让旧 token 失效。
+- `invalid_resume_token` 通常表示 resume 请求不再匹配首次 `needs_llm` 的 operation/payload/context；应重启对应 API 流程并使用新返回的 token，而不是复用旧 token。
 - 不要把 `llm_result` 直接写入 object files。
 - 如果 resume 后返回 `needs_review`，必须继续执行 review gate，而不是默认写入。
 - `needs_llm` result 只把 LLM 请求当作 opaque request 处理；skill 文档和用户报告中不要暴露内部 prompt 内容、内部 prompt 名称或内部 schema 定义。
@@ -201,6 +205,11 @@ For directory input, `llm_result` must use:
 }
 ```
 
+- Resume token:
+  - Generation rule：`resume-kb.source.add-{digest}`，其中 `digest` 是 `sha256("kb.source.add:" + canonical_json(token_payload))` 的前 24 位；`canonical_json` 使用 sorted keys、紧凑分隔符和 `default=str`。
+  - Token payload：`input_path` 原始参数字符串；`inputs` 为解析出的 source input 相对路径列表；`title`；`tags` 或 `[]`；`authors` 或 `[]`。
+  - Validation rule：resume 时用当前 `input_path/title/tags/authors` 和当前解析出的 `inputs` 重算 token，必须与传入 `resume_token` 完全相等；路径字符串、metadata 列表内容或顺序变化都会导致 `invalid_resume_token`。
+
 - Result output fields: `source_ids`, `source.id`, `source.summary`,
   `source.cleaned_path`, `sources[].id`, `sources[].summary`,
   `sources[].cleaned_path`, `objects.created`, `diffs`, `index_rebuild`,
@@ -273,6 +282,11 @@ For directory input, `llm_result` must use:
   }
 }
 ```
+
+- Resume token:
+  - Generation rule：`resume-kb.candidate.create-{digest}`，其中 `digest` 是 `sha256("kb.candidate.create:" + canonical_json(token_payload))` 的前 24 位；`canonical_json` 使用 sorted keys、紧凑分隔符和 `default=str`。
+  - Token payload：`source_ids` 原始顺序；当前 active knowledgebases context（id、title、description、tags、scope、default_outline_id、outlines）；当前 source context（id、path、status、source_type、title、summary、tags、cleaned metadata、cleaned_path/content、Markdown source body）。
+  - Validation rule：resume 时重新读取 repository context 并重算 token，必须与传入 `resume_token` 完全相等；LLM/resume 间隙修改 active KB、outline、source metadata/body、cleaned content 或 `source_ids` 顺序都会让旧 token 失效。
 
 - Result output fields: `candidate_ids`, `candidates[].id`,
   `candidates[].bindto`, `candidates[].outline_change_suggestions`, flattened
@@ -438,6 +452,11 @@ For directory input, `llm_result` must use:
 }
 ```
 
+- Resume token:
+  - Generation rule：`resume-kb.knowledgebase.create-{digest}`，其中 `digest` 是 `sha256("kb.knowledgebase.create:" + canonical_json(token_payload))` 的前 24 位；`canonical_json` 使用 sorted keys、紧凑分隔符和 `default=str`。
+  - Token payload：`title`；`input_path` 原始参数字符串；`knowledgebase_id`；`knowledgebase_create_input`，包含解析后的 input kind、resolved path，以及文件内容或目录内 `.md/.txt/.yaml/.yml` 文档路径和内容。
+  - Validation rule：resume 时必须再次提供 `input_path`，API 重新读取 input file/directory 并重算 token，必须与传入 `resume_token` 完全相等；修改 input 内容、目录文件集合/内容、`title` 或 `knowledgebase_id` 都会让旧 token 失效。
+
 - Approved write payload:
 
 ```json
@@ -549,6 +568,11 @@ For directory input, `llm_result` must use:
   "llm_result": {"title": "<non-empty title>"}
 }
 ```
+
+- Resume token:
+  - Generation rule：`resume-kb.note.add-{digest}`，其中 `digest` 是 `sha256("kb.note.add:" + canonical_json(token_payload))` 的前 24 位；`canonical_json` 使用 sorted keys、紧凑分隔符和 `default=str`。
+  - Token payload：`content`；规范化后的 `title`（空白字符串会变成 `null`）；`note_id`。
+  - Validation rule：resume 时用当前 `content/title/note_id` 重算 token，必须与传入 `resume_token` 完全相等；note content、title 空值表达或 `note_id` 变化都会让旧 token 失效。
 
 - Result output fields: `note_id`, `path`, `note.id`, `note.path`,
   `note.frontmatter`, `note.body`, `objects.created`, `diffs`,
