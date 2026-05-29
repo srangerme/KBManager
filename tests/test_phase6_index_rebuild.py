@@ -34,7 +34,7 @@ def _seed_new_model(tmp_path: Path, *, bad_outline: bool = False) -> None:
             "type": "source",
             "title": "Source One",
             "source_type": "markdown",
-            "status": "raw",
+            "status": "linked",
             "path": "data/raw/md/source-20260520-001.md",
             "summary": "Source summary.",
             "cleaned": {},
@@ -154,6 +154,26 @@ def test_index_rebuild_reports_invalid_bindto_node_id(tmp_path: Path) -> None:
 
     assert result["status"] == "success"
     assert result["issues"][0]["code"] == "invalid_bindto_node_id"
+
+
+def test_index_rebuild_reports_source_status_drift(tmp_path: Path) -> None:
+    init_workspace(tmp_path)
+    _seed_new_model(tmp_path)
+    repository = _repo(tmp_path)
+    document = repository.read_markdown("data/raw/md/source-20260520-001.md")
+    frontmatter = dict(document.frontmatter)
+    frontmatter["status"] = "raw"
+    repository.write_markdown(
+        "data/raw/md/source-20260520-001.md",
+        MarkdownDocument(frontmatter=frontmatter, body=document.body),
+        overwrite=True,
+    )
+
+    result = index_rebuild(tmp_path).to_dict()
+
+    assert result["status"] == "success"
+    assert result["issues"][0]["code"] == "source_status_drift"
+    assert result["issues"][0]["expected"] == "linked"
 
 
 def test_knowledgebase_map_writes_outline_bindto_mermaid(tmp_path: Path) -> None:

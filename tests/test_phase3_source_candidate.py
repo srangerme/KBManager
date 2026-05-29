@@ -114,6 +114,10 @@ def test_source_add_resume_writes_source_and_cleaned(tmp_path: Path) -> None:
         .read_text(encoding="utf-8")
         .startswith("# Cleaned")
     )
+    document = ObjectRepository(Workspace(tmp_path)).read_markdown(
+        f"data/raw/md/{source_id}.md"
+    )
+    assert document.frontmatter["status"] == "raw"
 
 
 def test_candidate_create_writes_pending_candidate_with_bindto(tmp_path: Path) -> None:
@@ -139,6 +143,10 @@ def test_candidate_create_writes_pending_candidate_with_bindto(tmp_path: Path) -
     assert document.frontmatter["bindto"] == [
         {"kb_id": kb_id, "outline_id": "canonical", "node_id": "sec1", "reason": "Fits."}
     ]
+    source = ObjectRepository(Workspace(tmp_path)).read_markdown(
+        f"data/raw/md/{source_id}.md"
+    )
+    assert source.frontmatter["status"] == "linked"
     assert "relations" not in document.frontmatter
     assert "suggested_kb_ids" not in document.frontmatter
 
@@ -180,7 +188,7 @@ def test_candidate_create_rejects_archived_source_status(tmp_path: Path) -> None
     ).to_dict()
 
     assert result["status"] == "failed"
-    assert "raw or deprecated" in result["errors"][0]["message"]
+    assert "raw, linked, or deprecated" in result["errors"][0]["message"]
 
 
 def test_candidate_get_and_next_pending(tmp_path: Path) -> None:

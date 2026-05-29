@@ -149,9 +149,7 @@ def test_api_references_are_split_by_operation() -> None:
         REPO_ROOT / "skills/kbm-candidate/references/kb.knowledge.accept.md"
     ).read_text(encoding="utf-8")
 
-    assert "不得自行下载、打开、浏览、打印、导出、抓取、保存或重试" in (
-        source_reference
-    )
+    assert "当前实现只支持本地 `.md` 和 `.pdf` 文件" in source_reference
     assert "必须等待用户 approve 或 edited reviewed content" in candidate_reference
 
 
@@ -162,14 +160,23 @@ def test_skills_reference_api_files_from_workflows() -> None:
     candidate_skill = (REPO_ROOT / "skills/kbm-candidate/SKILL.md").read_text(
         encoding="utf-8"
     )
+    research_skill = (REPO_ROOT / "skills/kbm-research-on/SKILL.md").read_text(
+        encoding="utf-8"
+    )
 
     assert "意图流程图" in source_skill
     assert "references/kb.source.add.md" in source_skill
-    assert "../kbm-candidate/references/kb.candidate.create.md" in source_skill
+    assert "../kbm-candidate/references/kb.candidate.create.md" not in source_skill
+    assert "此工作流只创建 source，不创建 candidate" in source_skill
     assert "references/kb.knowledge.accept.md" in candidate_skill
+    assert "输入必须是已存在的 source IDs" in (
+        REPO_ROOT / "skills/kbm-candidate/references/kb.candidate.create.md"
+    ).read_text(encoding="utf-8")
     assert "没有明确用户决定时，绝不 accept、reject、defer 或 merge" in (
         candidate_skill
     )
+    assert "用户研究意图或问题" in research_skill
+    assert "明文可复制的引用资源链接" in research_skill
 
 
 def test_register_marketplace_script_adds_current_plugin(tmp_path: Path) -> None:

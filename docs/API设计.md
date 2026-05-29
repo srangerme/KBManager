@@ -224,7 +224,8 @@ API 收到 `llm_result` 后必须校验：
 - Interface 可在调用 `kb.source.add` 前处理可选临时 `user_prompt`：先由 LLM 重写为安全 prompt fragment，经用户确认后追加到 source ingest LLM 请求。该临时 prompt 不属于 `kb.source.add` 的持久化参数，也不得改变 API 的校验和写入语义。
 - 校验：本地路径可读、类型支持、元数据事实来源唯一；`summary` 非空；`tags` 必须是字符串列表，空值用 `[]`；`cleaned_content` 可追溯原始资源；LLM 不得覆盖事实字段。workspace 边界只限制 KBManager 对象和派生文件的写入位置，不限制本地 source 输入文件的读取位置。
 - LLM 结果结构：单文件输入时 `llm_result` 必须包含 `input_path`、非空 `summary`、`tags` 字符串列表和非空 `cleaned_content`；`cleaned_content` 必须包含请求的 `input_path`。目录输入产生多个 source 时，`llm_result.sources` 必须与请求的每个输入路径一一对应，每项都必须包含 `input_path`、非空 `summary`、`tags` 和非空 `cleaned_content`。
-- 输出：source ID、source `summary`、`tags`、source 内的 cleaned 派生字段引用、原始资源引用。
+- 写入：初始 source 状态为 `raw`。
+- 输出：`source_ids`、首个 `source.id`/`source.summary`/`source.cleaned_path`、`sources[]` 中每个 source 的 `id`/`summary`/`cleaned_path`，以及 `objects.created`、`diffs`、`index_rebuild`、`warnings`、`errors` 和 `next_actions`。
 
 ### `kb.source.deprecate`
 
@@ -239,8 +240,9 @@ API 收到 `llm_result` 后必须校验：
 
 ### `kb.candidate.create`
 
+- 输入：已有 source IDs。
 - 读取：上游 source、candidate 模板、active knowledge base 的 `description`、`tags`、`scope` 和 `outline`、`candidate-create.md`。
-- 写入：一个或多个 pending candidate Markdown，字段包含 `id`、`type: candidate`、`title`、`status: pending`、`bindto`、`outline_change_suggestions`、`summary`、`evidence`、空 `review.reviewed_at`、空 `review.decision`、空 `review.reason`、`created`、`updated`。
+- 写入：一个或多个 pending candidate Markdown，字段包含 `id`、`type: candidate`、`title`、`status: pending`、`bindto`、`outline_change_suggestions`、`summary`、`evidence`、空 `review.reviewed_at`、空 `review.decision`、空 `review.reason`、`created`、`updated`；成功后按有效引用关系同步 source `raw/linked` 状态。
 - LLM 辅助：需要。API 返回 `needs_llm`，Claude Code 先依据已有 knowledge base 的 `description/scope/outline` 判断 source 中哪些内容符合已有知识库要求，再生成 candidate draft list、`bindto` 建议和 outline 修改建议后 resume；candidate 只能从 source 生成，不能从 note 生成。
 - 校验：每个 candidate 必须有证据；candidate ID 必须是全局唯一的 knowledge ID，显式提供时必须形如 `knowledge-YYYYMMDD-001`，也可省略由 API 分配。
 - LLM 结果结构：

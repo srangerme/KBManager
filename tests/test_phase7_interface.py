@@ -90,23 +90,18 @@ def _merge_assist() -> dict[str, Any]:
     }
 
 
-def test_source_add_orchestrates_source_and_candidate_llm_resumes() -> None:
+def test_source_add_orchestrates_source_llm_resume_only() -> None:
     api = MockApi(
         {
             "kb.source.add": [
                 _needs_llm("kb.source.add", "source-token"),
                 _success("kb.source.add", source_ids=["source-1"]),
             ],
-            "kb.candidate.create": [
-                _needs_llm("kb.candidate.create", "candidate-token"),
-                _success("kb.candidate.create", candidate_ids=["knowledge-1"]),
-            ],
         }
     )
     llm = MockLlm(
         {
             "source_ingest": {"input_path": "input.md", "summary": "s", "cleaned_content": "c"},
-            "create_candidate": {"candidates": []},
         }
     )
 
@@ -116,8 +111,6 @@ def test_source_add_orchestrates_source_and_candidate_llm_resumes() -> None:
     assert [call[0] for call in api.calls] == [
         "kb.source.add",
         "kb.source.add",
-        "kb.candidate.create",
-        "kb.candidate.create",
     ]
 
 

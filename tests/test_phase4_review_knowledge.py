@@ -17,6 +17,11 @@ from kbmanager.repository import ObjectRepository
 from kbmanager.workspace import Workspace
 
 
+def _source_status(tmp_path: Path, source_id: str) -> str:
+    document = ObjectRepository(Workspace(tmp_path)).read_markdown(f"data/raw/md/{source_id}.md")
+    return str(document.frontmatter["status"])
+
+
 def _setup_candidate(
     tmp_path: Path,
     candidate_id: str = "knowledge-20260520-001",
@@ -110,6 +115,7 @@ def test_accept_requires_review_and_promotes_candidate(tmp_path: Path) -> None:
     assert document.frontmatter["summary"] == "Candidate summary."
     assert "kb_ids" not in document.frontmatter
     assert "relations" not in document.frontmatter
+    assert _source_status(tmp_path, payload["evidence"][0]["source_id"]) == "linked"
 
 
 def test_accept_rejects_evidence_not_from_candidate(tmp_path: Path) -> None:
@@ -152,7 +158,7 @@ def test_accept_rejects_empty_evidence(tmp_path: Path) -> None:
 
 
 def test_reject_and_defer_move_candidate(tmp_path: Path) -> None:
-    candidate_id, _, _ = _setup_candidate(tmp_path)
+    candidate_id, _, payload = _setup_candidate(tmp_path)
     rejected = knowledge_reject(
         tmp_path,
         candidate_id=candidate_id,
@@ -161,8 +167,9 @@ def test_reject_and_defer_move_candidate(tmp_path: Path) -> None:
     ).to_dict()
     assert rejected["status"] == "success"
     assert (tmp_path / "candidates/rejected" / f"{candidate_id}.md").exists()
+    assert _source_status(tmp_path, payload["evidence"][0]["source_id"]) == "raw"
 
-    candidate_id, _, _ = _setup_candidate(tmp_path, candidate_id="knowledge-20260520-002")
+    candidate_id, _, payload = _setup_candidate(tmp_path, candidate_id="knowledge-20260520-002")
     deferred = candidate_defer(
         tmp_path,
         candidate_id=candidate_id,
@@ -171,6 +178,7 @@ def test_reject_and_defer_move_candidate(tmp_path: Path) -> None:
     ).to_dict()
     assert deferred["status"] == "success"
     assert (tmp_path / "candidates/deferred" / f"{candidate_id}.md").exists()
+    assert _source_status(tmp_path, payload["evidence"][0]["source_id"]) == "linked"
 
 
 def test_merge_updates_target_and_rejects_source_candidate(tmp_path: Path) -> None:
@@ -263,3 +271,4 @@ def test_deprecate_knowledge_records_metadata(tmp_path: Path) -> None:
         f"knowledge/atomic/{candidate_id}.md"
     )
     assert document.frontmatter["status"] == "deprecated"
+    assert _source_status(tmp_path, payload["evidence"][0]["source_id"]) == "raw"

@@ -161,7 +161,6 @@ class InteractionInterface:
         reviewed_user_prompt: str | dict[str, Any] | None = None,
         confirm_user_prompt: bool = False,
         source_llm_result: dict[str, Any] | None = None,
-        candidate_llm_result: dict[str, Any] | None = None,
     ) -> InterfaceResult:
         calls: list[ApiCallRecord] = []
         confirmed_prompt: str | None = None
@@ -245,32 +244,10 @@ class InteractionInterface:
         if source["status"] != ApiStatus.SUCCESS.value:
             return self._from_api_result(source, calls, "Source add failed after resume.")
 
-        source_ids = list(source.get("source_ids", []))
-        candidate = self._call(calls, "kb.candidate.create", source_ids=source_ids)
-        if candidate["status"] != ApiStatus.NEEDS_LLM.value:
-            return self._from_api_result(
-                candidate,
-                calls,
-                "Candidate create did not reach LLM boundary.",
-            )
-
-        candidate_llm_result = candidate_llm_result or self._complete_llm(
-            "create_candidate",
-            candidate.get("llm_request"),
-            {"source_ids": source_ids},
-        )
-        candidate = self._call(
-            calls,
-            "kb.candidate.create",
-            source_ids=source_ids,
-            resume_token=candidate["resume"]["token"],
-            llm_result=candidate_llm_result,
-        )
         return self._from_api_result(
-            candidate,
+            source,
             calls,
-            "Added source and created candidate drafts.",
-            extra={"source": source, "candidate": candidate},
+            "Added source.",
         )
 
     def kb_source_deprecate(

@@ -332,7 +332,6 @@ def source_add(
         SOURCE_ADD_OPERATION,
         objects=ObjectChanges(created=created),
         diffs=diffs,
-        next_actions=["Create candidates with kb.candidate.create for the new source IDs."],
         extra={
             "source_ids": [record["source_id"] for record in records],
             "source": {
@@ -2027,6 +2026,7 @@ def _consistency_issues(records: list[ObjectRecord], workspace: Workspace) -> li
         _append_reference_issues(record, by_id, issues)
         if record.object_type == "knowledge-base":
             _append_knowledgebase_outline_issues(record, workspace, issues)
+    _append_source_status_issues(records, workspace, issues)
     knowledgebases = [
         record
         for record in records
@@ -2039,6 +2039,30 @@ def _consistency_issues(records: list[ObjectRecord], workspace: Workspace) -> li
     ]
     issues.extend(_bindto_consistency_issues(knowledgebases, knowledge, workspace))
     return issues
+
+
+def _append_source_status_issues(
+    records: list[ObjectRecord],
+    workspace: Workspace,
+    issues: list[dict[str, str]],
+) -> None:
+    effective_source_ids = _effective_source_reference_ids(records)
+    for record in records:
+        if record.object_type != "source" or record.status == "deprecated":
+            continue
+        expected = "linked" if record.object_id in effective_source_ids else "raw"
+        if record.status == expected:
+            continue
+        issues.append(
+            {
+                "code": "source_status_drift",
+                "object_id": record.object_id,
+                "path": str(workspace.relative(record.path)),
+                "current": record.status,
+                "expected": expected,
+                "message": f"source {record.object_id} status should be {expected}",
+            }
+        )
 
 
 def _append_knowledgebase_outline_issues(
@@ -3165,6 +3189,9 @@ def _clean_expectations() -> dict[str, Any]:
             "directories": ["notes/active", "notes/deprecated"],
             "statuses": ["active", "deprecated"],
         },
+        "source": {
+            "statuses": ["raw", "linked", "deprecated"],
+        },
     }
 
 
@@ -3185,6 +3212,20 @@ def _clean_differences(
 
     for record in _all_records(repository):
         _append_field_schema_differences(record, workspace, differences)
+        if record.object_type == "source":
+            relative_path = str(workspace.relative(record.path))
+            if record.status not in {"raw", "linked", "deprecated"}:
+                differences.append(
+                    {
+                        "kind": "status_drift",
+                        "object_id": record.object_id,
+                        "object_type": "source",
+                        "path": relative_path,
+                        "current": record.status,
+                        "expected": "raw, linked, or deprecated",
+                        "migration": "update source status",
+                    }
+                )
         if record.object_type != "note":
             continue
         relative_path = str(workspace.relative(record.path))
@@ -3468,14 +3509,39 @@ def _success_with_index_rebuild(
     next_actions: list[str] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> ApiResult:
+    try:
+        workspace = Workspace(root)
+        repository = ObjectRepository(workspace)
+        source_status_updates = _sync_source_link_status(workspace, repository)
+    except (KBManagerError, OSError) as exc:
+        merged_warnings = (warnings or []) + [
+            f"Object changes were written, but source status sync failed: {exc}"
+        ]
+        return ApiResult(
+            status=ApiStatus.PARTIAL,
+            operation=operation,
+            objects=objects,
+            diffs=diffs,
+            warnings=merged_warnings,
+            next_actions=[
+                "Object changes were written, but source status sync failed. "
+                "Fix the reported issue and run kb.index.rebuild."
+            ],
+            extra=extra or {},
+        )
+
     rebuild = index_rebuild(root)
     rebuild_data = rebuild.to_dict()
     rebuild_diffs = [diff for diff in rebuild.diffs if diff.get("action") in {"create", "update"}]
     merged_objects = ObjectChanges(
         created=objects.created,
-        updated=objects.updated + rebuild.objects.updated,
+        updated=objects.updated + source_status_updates + rebuild.objects.updated,
         deprecated=objects.deprecated,
     )
+    sync_diffs = [
+        {"action": "update", "kind": "source", "path": path}
+        for path in source_status_updates
+    ]
     merged_warnings = (warnings or []) + rebuild.warnings
     merged_extra = dict(extra or {})
     merged_extra["index_rebuild"] = {
@@ -3489,7 +3555,7 @@ def _success_with_index_rebuild(
         return ApiResult.success(
             operation,
             objects=merged_objects,
-            diffs=diffs + rebuild_diffs,
+            diffs=diffs + sync_diffs + rebuild_diffs,
             warnings=merged_warnings,
             next_actions=next_actions or [],
             extra=merged_extra,
@@ -3498,8 +3564,8 @@ def _success_with_index_rebuild(
     return ApiResult(
         status=ApiStatus.PARTIAL,
         operation=operation,
-        objects=objects,
-        diffs=diffs,
+        objects=merged_objects,
+        diffs=diffs + sync_diffs,
         warnings=merged_warnings,
         errors=rebuild.errors,
         next_actions=[
@@ -3823,10 +3889,10 @@ def _validate_source_refs(
     records: list[ObjectRecord] = []
     for source_id in source_ids:
         record = _find_single_object(repository, source_id, expected_type="source")
-        if record.status not in {"raw", "deprecated"}:
+        if record.status not in {"raw", "linked", "deprecated"}:
             raise RepositoryError(
                 f"source has unsupported status: {source_id}; candidate sources must be "
-                "raw or deprecated"
+                "raw, linked, or deprecated"
             )
         records.append(record)
     return records
@@ -3887,6 +3953,37 @@ def _write_source_metadata(
         MarkdownDocument(frontmatter=metadata, body=document.body),
         overwrite=True,
     )
+
+
+def _sync_source_link_status(
+    workspace: Workspace,
+    repository: ObjectRepository,
+) -> list[str]:
+    records = _all_records(repository)
+    effective_source_ids = _effective_source_reference_ids(records)
+    updated: list[str] = []
+    for record in records:
+        if record.object_type != "source" or record.status == "deprecated":
+            continue
+        expected = "linked" if record.object_id in effective_source_ids else "raw"
+        if record.status == expected:
+            continue
+        metadata = dict(record.metadata)
+        metadata["status"] = expected
+        metadata["updated"] = _today()
+        _write_source_metadata(repository, workspace, record, metadata)
+        updated.append(str(workspace.relative(record.path)))
+    return updated
+
+
+def _effective_source_reference_ids(records: list[ObjectRecord]) -> set[str]:
+    source_ids: set[str] = set()
+    for record in records:
+        if record.object_type == "candidate" and record.status in {"pending", "deferred"}:
+            source_ids.update(_source_ids_from_evidence(record.metadata.get("evidence", [])))
+        elif record.object_type == "knowledge" and record.status == "accepted":
+            source_ids.update(_source_ids_from_evidence(record.metadata.get("evidence", [])))
+    return source_ids
 
 
 def _resource_for_meta_path(meta_path: Path) -> Path:

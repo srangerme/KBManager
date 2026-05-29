@@ -195,7 +195,8 @@ resume:
 ## 9. Workflow Summary
 
 - Init：`kb.init`。
-- Source add：`kb.source.add` -> handle `needs_llm` -> 必然调用 `kb.candidate.create` -> handle `needs_llm`；该 workflow 的语义是导入 source 并创建 pending candidates。
+- Source add：`kb.source.add` -> handle `needs_llm`；该 workflow 的语义是导入独立 source。
+- Candidate create：`kb.candidate.create` 使用已有 source IDs 创建 pending candidates。
 - Note add：收集 content；用户未提供标题时通过 `kb.note.add` 触发 title `needs_llm`；随后 resume 并写入 note。
 - Candidate review：`kb.candidate.get` 或 `kb.candidate.next_pending` -> skill 只读 review assist -> user decision -> review-gated API。
 - Knowledgebase create：`kb.knowledgebase.create` -> handle `needs_llm` -> resume -> user review -> approved `kb.knowledgebase.create`。
