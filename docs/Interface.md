@@ -56,6 +56,12 @@ skill workflow 或自然语言意图存在。
 
 内嵌在流程里的 LLM 能力不称为 skill。它们是 `system-prompts/` internal prompt module，由 API `needs_llm` 或第一层 workflow 固定触发。
 
+普通用户 workflow 中，第一层不得修改 plugin 提供的 `SKILL.md`、`references/`、
+`system-prompts/`、`src/kbmanager/`、`scripts/kbmanager_plugin.py` 或其他版本化资源。
+只有用户明确要求进行 plugin 开发或维护时，才允许修改这些资源。
+
+`kbm-download-paper-pdf` 不提供 bundled downloader scripts。Claude Code 负责现场搜索、验证和下载；下载结束后必须检查 `/tmp/kbm-downloads` 中的实际文件，最终总结只能基于实际存在且通过 PDF 核验的本次下载文件。
+
 ## 4. 输入与输出
 
 标准输入来源：

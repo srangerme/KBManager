@@ -11,6 +11,10 @@ description: 创建、查看、映射或维护 KBManager knowledgebase 与 outli
 
 此 skill 覆盖所有 KB 相关工作流：knowledgebase create/list/map，以及 outline create/set-default/archive 和用户明确要求时的 outline YAML 受控维护。
 
+普通用户 workflow 中，不得修改 plugin 提供的 `SKILL.md`、`references/`、
+`system-prompts/`、`src/kbmanager/`、`scripts/kbmanager_plugin.py` 或其他版本化资源。
+只有用户明确要求进行 plugin 开发或维护时，才允许修改这些资源。
+
 ## Knowledgebase 创建
 
 用于创建新的 active knowledgebase 和配套 outlines YAML。

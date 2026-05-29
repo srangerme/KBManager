@@ -11,6 +11,10 @@ description: 添加或废弃 KBManager source，包括本地文件、目录、PD
 
 此 skill 覆盖 source 生命周期：source add、source ingest guidance review、source deprecate，以及 source add 后强制创建 pending candidates。
 
+普通用户 workflow 中，不得修改 plugin 提供的 `SKILL.md`、`references/`、
+`system-prompts/`、`src/kbmanager/`、`scripts/kbmanager_plugin.py` 或其他版本化资源。
+只有用户明确要求进行 plugin 开发或维护时，才允许修改这些资源。
+
 ## Source 添加
 
 用于本地文件或目录 source 摄取，并随后强制创建 pending candidates。仅当用户意图是登记 KBManager source 或从材料生成候选知识时使用。

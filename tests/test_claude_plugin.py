@@ -39,6 +39,33 @@ def test_claude_plugin_packages_kbm_skills() -> None:
         assert "description:" in text
 
 
+def test_kbm_download_paper_pdf_has_no_bundled_scripts_requirement() -> None:
+    download_skill_dir = REPO_ROOT / "skills/kbm-download-paper-pdf"
+    text = (download_skill_dir / "SKILL.md").read_text(encoding="utf-8")
+
+    assert not (download_skill_dir / "scripts").exists()
+    assert "下载后目录核验" in text
+    assert "最终报告只能根据 `/tmp/kbm-downloads` 中实际存在且通过核验的本次下载文件生成" in text
+    assert "如果下载命令曾返回成功，但目录核验找不到有效文件" in text
+
+
+def test_kbm_skills_forbid_plugin_resource_edits_in_normal_workflows() -> None:
+    required = [
+        "普通用户 workflow 中，不得修改 plugin 提供的",
+        "`SKILL.md`",
+        "`references/`",
+        "`system-prompts/`",
+        "`src/kbmanager/`",
+        "`scripts/kbmanager_plugin.py`",
+        "只有用户明确要求进行 plugin 开发或维护时，才允许修改这些资源",
+    ]
+
+    for skill_path in sorted((REPO_ROOT / "skills").glob("kbm-*/SKILL.md")):
+        text = skill_path.read_text(encoding="utf-8")
+        for phrase in required:
+            assert phrase in text, f"{phrase!r} missing from {skill_path}"
+
+
 def test_knowledgebase_workflow_does_not_ingest_source_context() -> None:
     knowledgebase_skill = (
         REPO_ROOT / "skills/kbm-kb/SKILL.md"

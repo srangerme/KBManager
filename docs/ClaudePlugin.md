@@ -39,6 +39,17 @@ Internal LLM steps such as source ingest, candidate creation, note title
 generation, clean migration planning, and knowledgebase drafting remain
 `system-prompts/` modules triggered by API `needs_llm`.
 
+During ordinary user workflows, Claude Code must treat plugin-provided
+`SKILL.md`, `references/`, `system-prompts/`, `src/kbmanager/`,
+`scripts/kbmanager_plugin.py`, and other packaged resources as read-only. These
+resources may be changed only when the user explicitly asks for plugin
+development or maintenance.
+
+`kbm-download-paper-pdf` intentionally does not provide bundled downloader
+scripts. Claude Code performs the search and download workflow directly, then
+must verify `/tmp/kbm-downloads` and base its final download summary only on
+files that actually exist and pass the PDF checks.
+
 ## Runtime Flow
 
 Claude Code workflows load the relevant `kbm-*` skills and invoke the helper

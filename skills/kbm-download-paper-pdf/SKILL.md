@@ -10,6 +10,10 @@ description: 根据论文标题、DOI、URL、arXiv ID、PMCID、citation 或 Bi
 根据用户给出的论文信息查找合法公开 PDF，并在找到时下载到
 `/tmp/kbm-downloads/<paper-title>.pdf`。
 
+普通用户 workflow 中，不得修改 plugin 提供的 `SKILL.md`、`references/`、
+`system-prompts/`、`src/kbmanager/`、`scripts/kbmanager_plugin.py` 或其他版本化资源。
+只有用户明确要求进行 plugin 开发或维护时，才允许修改这些资源。
+
 ## 边界
 
 - 只使用无需邮箱、API key、登录、cookie、VPN、library proxy、订阅权限或人工请求的公开合法来源。
@@ -119,21 +123,37 @@ description: 根据论文标题、DOI、URL、arXiv ID、PMCID、citation 或 Bi
    - 检查文件头包含 `%PDF`。
    - 如果验证失败，删除该失败文件，并继续尝试下一个合法候选。
 
+## 下载后目录核验
+
+所有候选处理结束后，必须检查 `/tmp/kbm-downloads` 目录，并以目录中的实际文件作为最终总结依据。
+
+1. 只核验本次任务声称下载或尝试保存的文件；不要把目录中旧文件当作本次成功结果。
+2. 对每个本次下载文件确认：
+   - 文件实际存在；
+   - 文件非空；
+   - 文件头包含 `%PDF`；
+   - 文件名、来源 URL、title、DOI、arXiv ID 或 PMCID 与目标论文在可确认范围内一致。
+3. 对缺失、空文件、非 PDF、HTML 错误页、abstract page、landing page、不匹配论文或非本次任务文件，必须排除；失败下载残留文件应删除，无法删除时在报告中明确标记为 excluded。
+4. 如果下载命令曾返回成功，但目录核验找不到有效文件，最终仍报告 failed 或 partial，而不是 success。
+
 ## 报告
 
-成功时报告：
+最终报告只能根据 `/tmp/kbm-downloads` 中实际存在且通过核验的本次下载文件生成。
 
-- 保存路径；
+成功或部分成功时，对每个通过核验的文件报告：
+
+- 实际保存路径；
 - 论文标题；
 - authors/year，如已知；
 - DOI/arXiv/PMCID，如已知；
 - PDF 来源 URL；
 - 合法来源类型，例如 arXiv、PMC、OpenAlex OA repository、author page。
 
-失败时报告：
+失败或部分失败时报告：
 
 - 已提取的 paper metadata；
 - 已尝试的合法来源；
+- 下载后目录核验结果，包括缺失、损坏、非 PDF、不匹配或被排除的文件；
 - 为什么不能下载，例如：
   - 未找到无需凭证的公开 PDF；
   - publisher 页面只有摘要或订阅下载；

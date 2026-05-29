@@ -9,6 +9,10 @@ description: 基于现有 KBManager knowledgebase、scope 和 outline 生成 Cha
 
 从现有 KBManager knowledgebase 生成 ChatGPT Deep Research prompt。
 
+普通用户 workflow 中，不得修改 plugin 提供的 `SKILL.md`、`references/`、
+`system-prompts/`、`src/kbmanager/`、`scripts/kbmanager_plugin.py` 或其他版本化资源。
+只有用户明确要求进行 plugin 开发或维护时，才允许修改这些资源。
+
 ## 输入
 
 - Knowledgebase ID；或
