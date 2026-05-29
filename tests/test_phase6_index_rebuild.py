@@ -37,7 +37,6 @@ def _seed_new_model(tmp_path: Path, *, bad_outline: bool = False) -> None:
             "status": "linked",
             "path": "data/raw/md/source-20260520-001.md",
             "summary": "Source summary.",
-            "cleaned": {},
             "deprecated_at": None,
             "deprecated_reason": None,
             "tags": ["source-tag"],

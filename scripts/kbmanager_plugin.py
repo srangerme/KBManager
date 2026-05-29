@@ -55,7 +55,6 @@ def _operation_map() -> dict[str, Callable[..., Any]]:
         "kb.note.get": application.note_get,
         "kb.note.deprecate": application.note_deprecate,
         "kb.index.rebuild": application.index_rebuild,
-        "kb.clean.inspect": application.clean_inspect,
     }
 
 

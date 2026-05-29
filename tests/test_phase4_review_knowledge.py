@@ -38,7 +38,6 @@ def _setup_candidate(
         llm_result={
             "input_path": "source.md",
             "summary": "Source summary.",
-            "cleaned_content": "source.md cleaned",
         },
     ).to_dict()
     source_id = source["source"]["id"]

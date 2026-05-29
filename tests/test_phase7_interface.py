@@ -101,7 +101,7 @@ def test_source_add_orchestrates_source_llm_resume_only() -> None:
     )
     llm = MockLlm(
         {
-            "source_ingest": {"input_path": "input.md", "summary": "s", "cleaned_content": "c"},
+            "source_ingest": {"input_path": "input.md", "summary": "s"},
         }
     )
 

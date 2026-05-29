@@ -3,7 +3,7 @@
 本文定义第一层 Interaction & Orchestration。第一层由 Claude Code UI、
 `kbm-*` skills、自然语言交互、结果展示和 user review 组成，负责把用户意图编排为第二层 `kb.*` API 调用。
 
-除 clean 迁移执行和 `kbm-kb` 明确触发的 outline YAML 更新特许例外外，第一层不直接修改 Markdown/PDF/YAML 对象
+除 `kbm-kb` 明确触发的 outline YAML 更新特许例外外，第一层不直接修改 Markdown/PDF/YAML 对象
 文件，不直接维护对象状态机。所有知识库数据变更必须通过第二层 API 完成。
 
 ## 1. 第一层职责
@@ -21,7 +21,7 @@
 
 第一层不得：
 
-- 绕过 API 直接创建、修改、移动、删除对象文件；clean 迁移执行和 `kbm-kb` 的受控 outline YAML 更新除外。
+- 绕过 API 直接创建、修改、移动、删除对象文件；`kbm-kb` 的受控 outline YAML 更新除外。
 - 绕过 user review 修改正式 knowledge。
 - 把索引文件当作事实来源。
 - 在 check 中自动修复对象文件。
@@ -48,7 +48,7 @@ skill workflow 或自然语言意图存在。
 - `kbm-candidate`：candidate create/get/next pending/review。
 - `kbm-note`：note add/get/list/view/deprecate。
 - `kbm-kb`：knowledgebase create/list/map、outline create/set-default/archive，以及用户显式要求时的受控 outline YAML 更新。
-- `kbm-maintenance`：init、check、clean inspect 和 clean migration。
+- `kbm-maintenance`：init、check 和 index rebuild。
 - `kbm-research-on`：根据 knowledgebase 的 `description`、`scope` 和 outline 生成 Deep Research prompt。
 - `kbm-download-paper-pdf`：下载无需凭证的合法公开论文 PDF。
 
@@ -113,10 +113,9 @@ next_actions: []
 
 系统提示词类型：
 
-- `source-ingest.md`：生成 source `summary`、`tags` 和清洗内容。
+- `source-ingest.md`：生成 source `summary` 和 `tags`。
 - `candidate-create.md`：生成 pending candidate 草案。
 - `note-title.md`：为 note 生成标题。
-- `clean-migration-plan.md`：根据工作区差异生成迁移计划。
 - `knowledgebase-create.md`：根据 source-like input 生成 knowledgebase 草案，由 `kb.knowledgebase.create.prepare` / `revise` 的 `needs_llm` 返回。
 
 组装顺序：
@@ -168,8 +167,6 @@ resume:
 - `kb.knowledgebase.outline.archive`
 - `kb.note.deprecate`
 
-clean 迁移执行不是 `kb.*` helper API，不经过上述 PreToolUse helper hook；它是 Claude Code UI 特许执行流程，必须在执行前展示 approved plan 并获得用户明确确认。
-
 这些流程没有 review gate：
 
 - `kb.init`
@@ -181,7 +178,6 @@ clean 迁移执行不是 `kb.*` helper API，不经过上述 PreToolUse helper h
 - `kb.knowledgebase.map`
 - `kb.note.get`
 - `kb.index.rebuild`
-- `kb.clean.inspect`
 - list/view 只读展示
 
 
@@ -205,4 +201,3 @@ clean 迁移执行不是 `kb.*` helper API，不经过上述 PreToolUse helper h
 - List/view：只读展示对象或索引。
 - Map：`kb.knowledgebase.map`。
 - Check：`kb.index.rebuild`。
-- Clean inspect：`kb.clean.inspect`; migration execution requires Claude Code UI approval.

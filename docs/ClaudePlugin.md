@@ -27,7 +27,7 @@ All KBManager skills use the `kbm-` prefix:
 - `kbm-candidate`: candidate create, get, next pending, and review workflows.
 - `kbm-note`: note add, get, list, view, and deprecate workflows.
 - `kbm-kb`: knowledgebase create, list, map, outline, and controlled outline YAML update workflows.
-- `kbm-maintenance`: init, check, clean inspect, and clean migration workflows.
+- `kbm-maintenance`: init, check, and index rebuild workflows.
 - `kbm-research-on`: generate a Deep Research prompt from a knowledgebase.
 - `kbm-download-paper-pdf`: find and download legal public paper PDFs to `/tmp/kbm-downloads` without using credentials, login, library access, or paywall bypasses.
 
@@ -36,7 +36,7 @@ fields, resume/review constraints, and hard rules live in API-specific files in
 each domain skill's `references/` directory.
 
 Internal LLM steps such as source ingest, candidate creation, note title
-generation, clean migration planning, and knowledgebase drafting remain
+generation, and knowledgebase drafting remain
 `system-prompts/` modules triggered by API `needs_llm`.
 
 During ordinary user workflows, Claude Code must treat plugin-provided

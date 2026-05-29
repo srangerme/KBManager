@@ -66,5 +66,5 @@ resume-kb.knowledgebase.create.prepare-<sha256(operation + normalized token payl
 - hook reject + note 时，不执行原写入；把 note 回流到 `kb.knowledgebase.create.revise`，再用 revised payload 重新调用本 API。
 - 不得调用 `kb.source.add`。
 - 不得调用 `kb.candidate.create`。
-- 不要写入 `data/raw` 或 `data/cleaned`。
+- 不要创建持久 source 或写入 `data/raw`。
 - 不要直接创建或编辑 knowledgebase files。

@@ -144,7 +144,6 @@ KBManager 本体不保存用户数据。用户侧不提供提示词文件，API 
 - `source-ingest.md`
 - `candidate-create.md`
 - `note-title.md`
-- `clean-migration-plan.md`
 - `knowledgebase-create.md`
 
 Claude Code 的组装顺序：
@@ -198,7 +197,7 @@ API 收到 `llm_result` 后必须校验：
 - 读取：KBManager 发布包中的默认目录清单和模板文件。
 - 写入：在目标目录创建受控工作区目录结构、`indexes/`、必要的空索引占位文件，以及每个初始化目录下的空 `KBM.ignore`；对象模板保留为 KBManager 发布包内的系统资源，不写入用户工作区。
 - 默认创建路径：
-  - `data/raw/md/`、`data/raw/pdf/`、`data/cleaned/`、`data/attachments/`
+  - `data/raw/md/`、`data/raw/pdf/`、`data/attachments/`
   - `candidates/pending/`、`candidates/rejected/`、`candidates/deferred/`
   - `knowledge/atomic/`、`knowledge/bases/`
   - `notes/active/`、`notes/deprecated/`
@@ -215,13 +214,13 @@ API 收到 `llm_result` 后必须校验：
 ### `kb.source.add`
 
 - 读取：source 模板和输入资源。
-- 写入：source 对象字段 `id`、`type: source`、`title`、`source_type`、`status: raw`、`path`、`summary`、`cleaned`、`deprecated_at`、`deprecated_reason`、`tags`、`created`、`updated`；PDF 原文保存为 `data/raw/pdf/*.pdf` + `.meta.yml`，Markdown 原文保存为 `data/raw/md/*.md`。
-- LLM 辅助：必需。API 固定返回 `needs_llm`，由 Claude Code 在同一次 LLM 调用中生成 source `summary`、`tags` 和 `cleaned_content` 后 resume。
+- 写入：source 对象字段 `id`、`type: source`、`title`、`source_type`、`status: raw`、`path`、`summary`、`deprecated_at`、`deprecated_reason`、`tags`、`created`、`updated`；PDF 原文保存为 `data/raw/pdf/*.pdf` + `.meta.yml`，Markdown 原文保存为 `data/raw/md/*.md`。
+- LLM 辅助：必需。API 固定返回 `needs_llm`，由 Claude Code 在同一次 LLM 调用中生成 source `summary` 和 `tags` 后 resume。
 - Interface 可在调用 `kb.source.add` 前处理可选临时 `user_prompt`：先由 LLM 重写为安全 prompt fragment，经用户确认后追加到 source ingest LLM 请求。该临时 prompt 不属于 `kb.source.add` 的持久化参数，也不得改变 API 的校验和写入语义。
-- 校验：本地路径可读、类型支持、元数据事实来源唯一；`summary` 非空；`tags` 必须是字符串列表，空值用 `[]`；`cleaned_content` 可追溯原始资源；LLM 不得覆盖事实字段。workspace 边界只限制 KBManager 对象和派生文件的写入位置，不限制本地 source 输入文件的读取位置。
-- LLM 结果结构：单文件输入时 `llm_result` 必须包含 `input_path`、非空 `summary`、`tags` 字符串列表和非空 `cleaned_content`；`cleaned_content` 必须包含请求的 `input_path`。目录输入产生多个 source 时，`llm_result.sources` 必须与请求的每个输入路径一一对应，每项都必须包含 `input_path`、非空 `summary`、`tags` 和非空 `cleaned_content`。
+- 校验：本地路径可读、必须是单个 `.md` 或 `.pdf` 文件、类型支持、元数据事实来源唯一；`summary` 非空；`tags` 必须是字符串列表，空值用 `[]`；LLM 不得覆盖事实字段。workspace 边界只限制 KBManager 对象写入位置，不限制本地 source 输入文件的读取位置。
+- LLM 结果结构：`llm_result` 必须包含 `input_path`、非空 `summary`，可包含 `tags` 字符串列表。
 - 写入：初始 source 状态为 `raw`。
-- 输出：`source_ids`、首个 `source.id`/`source.summary`/`source.cleaned_path`、`sources[]` 中每个 source 的 `id`/`summary`/`cleaned_path`，以及 `objects.created`、`diffs`、`index_rebuild`、`warnings`、`errors` 和 `next_actions`。
+- 输出：`source_ids`、`source.id`/`source.summary`，以及 `objects.created`、`diffs`、`index_rebuild`、`warnings`、`errors` 和 `next_actions`。
 
 ### `kb.source.deprecate`
 
@@ -339,7 +338,7 @@ candidates:
 - Review gate：由 Claude Code PreToolUse hook 在最终写入前触发审批。
 - 校验：`title` 和 `description` 必须是非空字符串；`tags` 必须是字符串列表；`scope` 必须明确包含和排除范围；显式 `knowledgebase_id` 必须形如 `kb-YYYYMMDD-001` 或 `kb-YYYYMMDD-001-title-slug` 且全局唯一；标题不能与已有 knowledge-base 重复；`default_outline_id` 必须指向一个 active outline；每个 outline 和可绑定 node 必须有稳定 ID。
 - 输出：knowledgebase ID、Markdown 路径、outlines YAML 路径和自动索引重建结果。
-- 约束：本 API 不创建 source 对象，不写入 `data/raw` 或 `data/cleaned`，不提供 knowledgebase add/remove 成员维护能力；knowledgebase 成员关系只由 knowledge `bindto` 表达。
+- 约束：本 API 不创建 source 对象，不写入 `data/raw`，不提供 knowledgebase add/remove 成员维护能力；knowledgebase 成员关系只由 knowledge `bindto` 表达。
 
 ### `kb.knowledgebase.create.prepare` / `kb.knowledgebase.create.revise`
 
@@ -415,13 +414,6 @@ candidates:
 - Review gate：不需要，因为索引是派生视图，不是事实来源。
 - 输出：重建的索引路径、diff、发现的一致性问题和未修复项；一致性问题必须覆盖无效 `bindto` 和不存在的 outline 节点。
 - 约束：不得把索引内容反向写回对象事实；对象文件和索引冲突时始终以对象文件为准。
-
-### `kb.clean.inspect`
-
-- 行为：只读扫描当前工作区目录设计和对象字段，对比当前版本预期。
-- LLM 辅助：存在差异时返回 `needs_llm`，Claude Code 根据差异生成迁移计划。
-- 输出差异：缺失目录、字段 schema drift、状态 drift、路径迁移和冲突风险；只检查当前新设计预期，不承担旧设计迁移。
-- 约束：API 不执行迁移、不写对象文件；clean migration workflow 在展示完整迁移计划并获得用户整批确认后，才允许 Claude Code UI 直接修改文件。
 
 ## 11. Review Gate
 

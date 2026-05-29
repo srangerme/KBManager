@@ -30,7 +30,7 @@ description: 根据论文标题、DOI、URL、arXiv ID、PMCID、citation 或 Bi
 - arXiv URL 或 arXiv ID；
 - PubMed Central PMCID；
 - 论文标题；
-- 论文标题 + 作者/年份；
+- 论文标题 + 年份；
 - 出版商 URL；
 - 作者/项目/实验室/GitHub/Papers With Code URL；
 - BibTeX、citation 或混合文本。
@@ -38,7 +38,6 @@ description: 根据论文标题、DOI、URL、arXiv ID、PMCID、citation 或 Bi
 先提取并记录可用 paper metadata：
 
 - `title`
-- `authors`
 - `year`
 - `doi`
 - `arxiv_id`
@@ -144,7 +143,7 @@ description: 根据论文标题、DOI、URL、arXiv ID、PMCID、citation 或 Bi
 
 - 实际保存路径；
 - 论文标题；
-- authors/year，如已知；
+- 年份，如已知；
 - DOI/arXiv/PMCID，如已知；
 - PDF 来源 URL；
 - 合法来源类型，例如 arXiv、PMC、OpenAlex OA repository、author page。

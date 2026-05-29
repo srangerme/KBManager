@@ -11,7 +11,6 @@ def _source_llm_result(input_path: str = "incoming.md") -> dict[str, object]:
     return {
         "input_path": input_path,
         "summary": "A useful source summary.",
-        "cleaned_content": f"Source: {input_path}\nUseful cleaned content.",
     }
 
 
@@ -136,8 +135,9 @@ def test_candidate_create_llm_request_includes_source_context(tmp_path: Path) ->
 
     source_context = first["llm_request"]["prompt"]["sections"][1]["content"]["source_context"]
     assert source_context[0]["id"] == source_id
-    assert "Useful cleaned content." in source_context[0]["cleaned_content"]
-    assert source_context[0]["cleaned_path"].startswith("data/cleaned/")
+    assert "cleaned_content" not in source_context[0]
+    assert "cleaned_path" not in source_context[0]
+    assert "# Raw" in source_context[0]["source_body"]
 
 
 def test_candidate_merge_without_reviewed_payload_waits_for_user(tmp_path: Path) -> None:

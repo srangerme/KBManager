@@ -20,7 +20,6 @@ def _source_llm_result(input_path: str = "incoming.md") -> dict[str, object]:
         "input_path": input_path,
         "title": "Source Title",
         "summary": "A useful source summary.",
-        "cleaned_content": f"# Cleaned\n\nSource: {input_path}\n\nUseful cleaned content.",
         "tags": ["ai"],
     }
 
@@ -104,19 +103,30 @@ def test_source_add_needs_llm_does_not_write(tmp_path: Path) -> None:
     assert not list((tmp_path / "data/raw/md").glob("source-*.md"))
 
 
-def test_source_add_resume_writes_source_and_cleaned(tmp_path: Path) -> None:
+def test_source_add_resume_writes_source(tmp_path: Path) -> None:
     source_id = _create_source(tmp_path)
 
     assert (tmp_path / "data/raw/md" / f"{source_id}.md").is_file()
-    assert (
-        (tmp_path / "data/cleaned" / f"{source_id}.md")
-        .read_text(encoding="utf-8")
-        .startswith("# Cleaned")
-    )
     document = ObjectRepository(Workspace(tmp_path)).read_markdown(
         f"data/raw/md/{source_id}.md"
     )
     assert document.frontmatter["status"] == "raw"
+    assert "cleaned" not in document.frontmatter
+    assert "authors" not in document.frontmatter
+    assert "published_at" not in document.frontmatter
+
+
+def test_source_add_rejects_directory_input(tmp_path: Path) -> None:
+    init_workspace(tmp_path)
+    source_dir = tmp_path / "incoming"
+    source_dir.mkdir()
+    (source_dir / "one.md").write_text("# Raw\n", encoding="utf-8")
+
+    result = source_add(tmp_path, input_path="incoming").to_dict()
+
+    assert result["status"] == "failed"
+    assert result["errors"][0]["code"] == "invalid_input"
+    assert "single .md or .pdf file" in result["errors"][0]["message"]
 
 
 def test_candidate_create_writes_pending_candidate_with_bindto(tmp_path: Path) -> None:

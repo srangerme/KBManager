@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 from kbmanager.application import (
-    clean_inspect,
     init_workspace,
     knowledgebase_create,
     knowledgebase_create_prepare,
@@ -13,7 +12,7 @@ from kbmanager.application import (
     note_deprecate,
     note_get,
 )
-from kbmanager.repository import MarkdownDocument, ObjectRepository
+from kbmanager.repository import ObjectRepository
 from kbmanager.workspace import Workspace
 
 
@@ -152,26 +151,3 @@ def test_note_add_get_and_deprecate_moves_without_deleting(tmp_path: Path) -> No
     assert got["note"]["body"] == "\n## Note\n\nA useful note.\n"
     assert deprecated["status"] == "success"
     assert (tmp_path / "notes/deprecated" / f"{added['note_id']}.md").is_file()
-
-
-def test_clean_inspect_reports_current_schema_drift_only(tmp_path: Path) -> None:
-    init_workspace(tmp_path)
-    added = note_add(
-        tmp_path, content="A useful note.", title="Note"
-    ).to_dict()
-    document = ObjectRepository(Workspace(tmp_path)).read_markdown(added["path"])
-    frontmatter = dict(document.frontmatter)
-    frontmatter["unexpected"] = "drift"
-    path = tmp_path / added["path"]
-    path.write_text(
-        ObjectRepository.render_markdown(
-            MarkdownDocument(frontmatter=frontmatter, body=document.body)
-        ),
-        encoding="utf-8",
-    )
-
-    data = clean_inspect(tmp_path).to_dict()
-
-    assert data["status"] == "needs_llm"
-    assert data["differences"][0]["kind"] == "unexpected_fields"
-    assert data["differences"][0]["fields"] == ["unexpected"]

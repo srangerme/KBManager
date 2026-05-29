@@ -22,7 +22,6 @@ PROMPT_BY_PURPOSE = {
     "source_ingest": "source-ingest",
     "create_candidate": "candidate-create",
     "note_title": "note-title",
-    "clean_migration_plan": "clean-migration-plan",
     "knowledgebase_create": "knowledgebase-create",
     "candidate_review_revise": "candidate-review-revise",
 }
@@ -30,21 +29,13 @@ PROMPT_BY_PURPOSE = {
 OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
     "source_ingest_result": {
         "type": "object",
-        "required": ["input_path", "summary", "cleaned_content"],
+        "required": ["input_path", "summary"],
         "properties": {
             "input_path": "string",
             "title": "string",
             "summary": "non-empty string",
-            "cleaned_content": "non-empty string",
             "tags": "list[string]",
-            "authors": "list[string]",
-            "published_at": "string|null",
         },
-    },
-    "source_ingest_result_list": {
-        "type": "object",
-        "required": ["sources"],
-        "properties": {"sources": "list[source_ingest_result]"},
     },
     "candidate_draft_list": {
         "type": "object",
@@ -69,18 +60,6 @@ OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": "object",
         "required": ["title"],
         "properties": {"title": "non-empty string"},
-    },
-    "clean_migration_plan": {
-        "type": "object",
-        "required": ["summary", "moves", "field_deletions", "field_updates", "risks"],
-        "properties": {
-            "summary": "non-empty string",
-            "moves": "list[{from, to, reason}]",
-            "field_deletions": "list[{path, fields, reason}]",
-            "field_updates": "list[{path, field, from, to, reason}]",
-            "risks": "list[string]",
-            "execution_order": "list[string]",
-        },
     },
     "knowledgebase_create_draft": {
         "type": "object",

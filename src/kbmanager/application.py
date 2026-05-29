@@ -45,13 +45,11 @@ NOTE_ADD_OPERATION = "kb.note.add"
 NOTE_GET_OPERATION = "kb.note.get"
 NOTE_DEPRECATE_OPERATION = "kb.note.deprecate"
 INDEX_REBUILD_OPERATION = "kb.index.rebuild"
-CLEAN_INSPECT_OPERATION = "kb.clean.inspect"
 CANDIDATE_REVIEW_REVISE_OPERATION = "kb.candidate.review.revise"
 
 INIT_DIRECTORIES = (
     "data/raw/md",
     "data/raw/pdf",
-    "data/cleaned",
     "data/attachments",
     "candidates/pending",
     "candidates/rejected",
@@ -240,7 +238,6 @@ def source_add(
     input_path: str | Path,
     title: str | None = None,
     tags: list[str] | None = None,
-    authors: list[str] | None = None,
     resume_token: str | None = None,
     llm_result: dict[str, Any] | None = None,
 ) -> ApiResult:
@@ -248,14 +245,13 @@ def source_add(
 
     try:
         workspace = Workspace(root)
-        _validate_source_add_input(title=title, tags=tags, authors=authors)
-        source_inputs = _source_inputs(workspace, input_path)
+        _validate_source_add_input(title=title, tags=tags)
+        source_input = _source_input(workspace, input_path)
         token_payload = {
             "input_path": str(Path(input_path)),
-            "inputs": [source.relative_path for source in source_inputs],
+            "source_input": source_input.relative_path,
             "title": title,
             "tags": tags or [],
-            "authors": authors or [],
         }
     except (KBManagerError, OSError) as exc:
         suggestion, next_actions = _source_add_input_failure_recovery()
@@ -272,19 +268,15 @@ def source_add(
             SOURCE_ADD_OPERATION,
             purpose="source_ingest",
             system_prompt="source-ingest",
-            required_context=[source.relative_path for source in source_inputs],
-            output_schema=(
-                "source_ingest_result" if len(source_inputs) == 1 else "source_ingest_result_list"
-            ),
+            required_context=[source_input.relative_path],
+            output_schema="source_ingest_result",
             constraints=[
                 "summary_required",
-                "cleaned_content_required",
-                "cleaned_content_must_reference_input_path",
                 "metadata_suggestions_must_not_override_fact_fields",
             ],
             token_payload=token_payload,
         )
-        context_documents = _source_context_documents(source_inputs)
+        context_documents = _source_context_documents([source_input])
         if context_documents:
             result.extra["llm_request"]["context_documents"] = context_documents
         return result
@@ -299,29 +291,17 @@ def source_add(
 
     try:
         repository = ObjectRepository(workspace)
-        parsed_sources = _validate_source_llm_results(llm_result, source_inputs)
-        records = _plan_source_records(
+        parsed_source = _validate_source_llm_result(llm_result, source_input.relative_path)
+        record = _plan_source_record(
             repository,
-            source_inputs,
-            parsed_sources,
+            source_input,
+            parsed_source,
             title,
             tags,
-            authors,
         )
-        created = [
-            path
-            for record in records
-            for path in (record["source_relative"], record["cleaned_relative"])
-        ]
-        diffs = [
-            {"action": "create", "kind": kind, "path": path}
-            for record in records
-            for kind, path in (
-                ("source", record["source_relative"]),
-                ("cleaned", record["cleaned_relative"]),
-            )
-        ]
-        _write_source_records_atomic(workspace, repository, records)
+        created = [record["source_relative"]]
+        diffs = [{"action": "create", "kind": "source", "path": record["source_relative"]}]
+        _write_source_record_atomic(workspace, repository, record)
     except (KBManagerError, OSError) as exc:
         return _failed(
             SOURCE_ADD_OPERATION,
@@ -336,20 +316,11 @@ def source_add(
         objects=ObjectChanges(created=created),
         diffs=diffs,
         extra={
-            "source_ids": [record["source_id"] for record in records],
+            "source_ids": [record["source_id"]],
             "source": {
-                "id": records[0]["source_id"],
-                "summary": records[0]["parsed"]["summary"],
-                "cleaned_path": records[0]["cleaned_relative"],
+                "id": record["source_id"],
+                "summary": record["parsed"]["summary"],
             },
-            "sources": [
-                {
-                    "id": record["source_id"],
-                    "summary": record["parsed"]["summary"],
-                    "cleaned_path": record["cleaned_relative"],
-                }
-                for record in records
-            ],
         },
     )
 
@@ -1574,63 +1545,6 @@ def note_deprecate(
         objects=ObjectChanges(deprecated=[deprecated_relative]),
         diffs=diffs,
         extra={"note_id": note_id, "path": deprecated_relative},
-    )
-
-
-def clean_inspect(
-    root: str | Path = ".",
-) -> ApiResult:
-    """Inspect workspace drift from the current object layout and schema."""
-
-    try:
-        workspace = Workspace(root)
-        repository = ObjectRepository(workspace)
-        differences = _clean_differences(workspace, repository)
-    except (KBManagerError, OSError) as exc:
-        return _failed(
-            CLEAN_INSPECT_OPERATION,
-            "clean_inspect_failed",
-            str(exc),
-            "Fix unreadable object files, then inspect again.",
-        )
-
-    if not differences:
-        return ApiResult.success(
-            CLEAN_INSPECT_OPERATION,
-            extra={"differences": [], "migration_required": False},
-            next_actions=["No migration plan is needed."],
-        )
-
-    result = _needs_llm(
-        CLEAN_INSPECT_OPERATION,
-        purpose="clean_migration_plan",
-        system_prompt="clean-migration-plan",
-        required_context=["clean.differences"],
-        output_schema="clean_migration_plan",
-        constraints=[
-            "plan_only",
-            "user_confirmation_required_before_file_changes",
-            "clean_command_may_edit_files_after_confirmation",
-        ],
-        token_payload={
-            "differences": differences,
-            "current_version_expectations": _clean_expectations(),
-        },
-        warnings=_clean_warnings(differences),
-    )
-    extra = dict(result.extra)
-    extra["differences"] = differences
-    extra["migration_required"] = True
-    return ApiResult(
-        status=result.status,
-        operation=result.operation,
-        objects=result.objects,
-        diffs=result.diffs,
-        warnings=result.warnings,
-        errors=result.errors,
-        review=result.review,
-        next_actions=result.next_actions,
-        extra=extra,
     )
 
 
@@ -3165,12 +3079,7 @@ def _candidate_source_context(
             "title": metadata.get("title"),
             "summary": metadata.get("summary"),
             "tags": metadata.get("tags", []),
-            "cleaned": metadata.get("cleaned", {}),
         }
-        cleaned_path = _cleaned_path_from_source_metadata(metadata)
-        if cleaned_path is not None:
-            source_item["cleaned_path"] = cleaned_path
-            source_item["cleaned_content"] = _read_optional_workspace_text(workspace, cleaned_path)
         if record.path.suffix.lower() == ".md":
             try:
                 document = repository.read_markdown(workspace.relative(record.path))
@@ -3180,20 +3089,6 @@ def _candidate_source_context(
                 source_item["source_body"] = document.body
         context.append(source_item)
     return context
-
-
-def _cleaned_path_from_source_metadata(metadata: dict[str, Any]) -> str | None:
-    cleaned = metadata.get("cleaned")
-    if isinstance(cleaned, dict) and isinstance(cleaned.get("path"), str):
-        return cleaned["path"]
-    return None
-
-
-def _read_optional_workspace_text(workspace: Workspace, relative_path: str) -> str:
-    try:
-        return workspace.resolve(relative_path).read_text(encoding="utf-8")
-    except OSError as exc:
-        return f"<unreadable: {exc}>"
 
 
 def _validate_outline_change_suggestions(
@@ -3300,245 +3195,6 @@ def _clean_note_frontmatter(frontmatter: dict[str, Any]) -> None:
 
 def _note_status(status: str) -> str:
     return "deprecated" if status == "deprecated" else "active"
-
-
-def _clean_expectations() -> dict[str, Any]:
-    return {
-        "directories": list(INIT_DIRECTORIES),
-        "object_schemas": {
-            object_type: {
-                "required_fields": sorted(schema["required"]),
-                "allowed_fields": sorted(schema["allowed"]),
-            }
-            for object_type, schema in _clean_object_schemas().items()
-        },
-        "note": {
-            "directories": ["notes/active", "notes/deprecated"],
-            "statuses": ["active", "deprecated"],
-        },
-        "source": {
-            "statuses": ["raw", "linked", "deprecated"],
-        },
-    }
-
-
-def _clean_differences(
-    workspace: Workspace,
-    repository: ObjectRepository,
-) -> list[dict[str, Any]]:
-    differences: list[dict[str, Any]] = []
-    for relative_dir in sorted(INIT_DIRECTORIES):
-        if not workspace.resolve(relative_dir).is_dir():
-            differences.append(
-                {
-                    "kind": "missing_directory",
-                    "path": relative_dir,
-                    "expected": "directory exists",
-                }
-            )
-
-    for record in _all_records(repository):
-        _append_field_schema_differences(record, workspace, differences)
-        if record.object_type == "source":
-            relative_path = str(workspace.relative(record.path))
-            if record.status not in {"raw", "linked", "deprecated"}:
-                differences.append(
-                    {
-                        "kind": "status_drift",
-                        "object_id": record.object_id,
-                        "object_type": "source",
-                        "path": relative_path,
-                        "current": record.status,
-                        "expected": "raw, linked, or deprecated",
-                        "migration": "update source status",
-                    }
-                )
-        if record.object_type != "note":
-            continue
-        relative_path = str(workspace.relative(record.path))
-        if record.status not in {"active", "deprecated"}:
-            differences.append(
-                {
-                    "kind": "status_drift",
-                    "object_id": record.object_id,
-                    "object_type": "note",
-                    "path": relative_path,
-                    "current": record.status,
-                    "expected": _note_status(record.status),
-                    "migration": "update note status",
-                }
-            )
-
-        expected_dir = "notes/deprecated" if record.status == "deprecated" else "notes/active"
-        expected_path = f"{expected_dir}/{record.path.name}"
-        if relative_path != expected_path and relative_path.startswith("notes/"):
-            diff: dict[str, Any] = {
-                "kind": "path_migration",
-                "object_id": record.object_id,
-                "object_type": "note",
-                "from": relative_path,
-                "to": expected_path,
-                "migration": "move note file",
-            }
-            target = workspace.resolve(expected_path)
-            if target.exists() and target != record.path:
-                diff["risk"] = "target_exists"
-            differences.append(diff)
-    return differences
-
-
-def _append_field_schema_differences(
-    record: ObjectRecord,
-    workspace: Workspace,
-    differences: list[dict[str, Any]],
-) -> None:
-    schemas = _clean_object_schemas()
-    schema = schemas.get(record.object_type)
-    relative_path = str(workspace.relative(record.path))
-    if schema is None:
-        differences.append(
-            {
-                "kind": "unknown_object_type",
-                "object_id": record.object_id,
-                "object_type": record.object_type,
-                "path": relative_path,
-                "expected": sorted(schemas),
-                "migration": "review object type before migration",
-            }
-        )
-        return
-
-    fields = set(record.metadata)
-    missing = sorted(schema["required"] - fields)
-    if missing:
-        differences.append(
-            {
-                "kind": "missing_fields",
-                "object_id": record.object_id,
-                "object_type": record.object_type,
-                "path": relative_path,
-                "fields": missing,
-                "migration": "add required frontmatter fields with reviewed values",
-            }
-        )
-
-    unexpected = sorted(fields - schema["allowed"])
-    if unexpected:
-        differences.append(
-            {
-                "kind": "unexpected_fields",
-                "object_id": record.object_id,
-                "object_type": record.object_type,
-                "path": relative_path,
-                "fields": unexpected,
-                "migration": "remove or migrate unsupported frontmatter fields",
-            }
-        )
-
-
-def _clean_object_schemas() -> dict[str, dict[str, set[str]]]:
-    object_fields = {"id", "type", "title", "status", "created", "updated"}
-    review_fields = {"reviewed_at", "review_decision"}
-    return {
-        "source": {
-            "required": object_fields
-            | {
-                "source_type",
-                "path",
-                "summary",
-                "cleaned",
-                "authors",
-                "published_at",
-                "imported_at",
-                "deprecated_at",
-                "deprecated_reason",
-                "tags",
-            },
-            "allowed": object_fields
-            | review_fields
-            | {
-                "source_type",
-                "path",
-                "summary",
-                "cleaned",
-                "authors",
-                "published_at",
-                "imported_at",
-                "deprecated_at",
-                "deprecated_reason",
-                "tags",
-            },
-        },
-        "candidate": {
-            "required": object_fields
-            | {
-                "bindto",
-                "outline_change_suggestions",
-                "summary",
-                "evidence",
-                "review",
-            },
-            "allowed": object_fields
-            | {
-                "bindto",
-                "outline_change_suggestions",
-                "summary",
-                "evidence",
-                "review",
-            },
-        },
-        "knowledge": {
-            "required": object_fields
-            | {
-                "summary",
-                "evidence",
-                "bindto",
-                "deprecated_at",
-                "deprecated_reason",
-            },
-            "allowed": object_fields
-            | review_fields
-            | {
-                "summary",
-                "evidence",
-                "bindto",
-                "review_reason",
-                "deprecated_at",
-                "deprecated_reason",
-            },
-        },
-        "knowledge-base": {
-            "required": object_fields
-            | {
-                "description",
-                "tags",
-                "scope",
-                "default_outline_id",
-                "outlines_file",
-                "outlines",
-            },
-            "allowed": object_fields
-            | review_fields
-            | {
-                "description",
-                "tags",
-                "scope",
-                "default_outline_id",
-                "outlines_file",
-                "outlines",
-            },
-        },
-        "note": {
-            "required": object_fields | {"deprecated_at", "deprecated_reason"},
-            "allowed": object_fields | review_fields | {"deprecated_at", "deprecated_reason"},
-        },
-    }
-
-
-def _clean_warnings(differences: list[dict[str, Any]]) -> list[str]:
-    if any(diff.get("risk") == "target_exists" for diff in differences):
-        return ["clean migration has target path conflicts; do not overwrite files."]
-    return []
 
 
 def _move_or_update_note_document(
@@ -3760,31 +3416,19 @@ def _resume_token(operation: str, payload: dict[str, Any]) -> str:
     return f"resume-{operation}-{digest}"
 
 
-def _source_inputs(workspace: Workspace, input_path: str | Path) -> list[SourceInput]:
+def _source_input(workspace: Workspace, input_path: str | Path) -> SourceInput:
     resolved = _resolve_local_source_input(workspace, input_path)
     if resolved.is_file():
-        return [
-            SourceInput(
-                path=resolved,
-                relative_path=_source_input_reference(workspace, resolved),
-                source_kind=_validate_source_input(resolved),
-                title_hint=resolved.stem,
-            )
-        ]
+        return SourceInput(
+            path=resolved,
+            relative_path=_source_input_reference(workspace, resolved),
+            source_kind=_validate_source_input(resolved),
+            title_hint=resolved.stem,
+        )
     if resolved.is_dir():
-        inputs = [
-            SourceInput(
-                path=path,
-                relative_path=_source_input_reference(workspace, path),
-                source_kind=_validate_source_input(path),
-                title_hint=path.stem,
-            )
-            for path in sorted(resolved.rglob("*"))
-            if path.is_file() and path.suffix.lower() in SUPPORTED_SOURCE_SUFFIXES
-        ]
-        if not inputs:
-            raise RepositoryError(f"source directory contains no supported files: {resolved}")
-        return inputs
+        raise RepositoryError(
+            f"source input must be a single .md or .pdf file, not a directory: {resolved}"
+        )
     raise RepositoryError(f"source input does not exist: {resolved}")
 
 
@@ -3831,58 +3475,11 @@ def _validate_source_add_input(
     *,
     title: str | None,
     tags: list[str] | None,
-    authors: list[str] | None,
 ) -> None:
     if title is not None and (not isinstance(title, str) or not title.strip()):
         raise RepositoryError("source title must be a non-empty string when provided")
     if tags is not None and not _is_string_list(tags):
         raise RepositoryError("source tags must be a list of strings; use [] when empty")
-    if authors is not None and not _is_string_list(authors):
-        raise RepositoryError("source authors must be a list of strings; use [] when empty")
-
-
-def _validate_source_llm_results(
-    result: dict[str, Any] | None,
-    source_inputs: list[SourceInput],
-) -> list[dict[str, Any]]:
-    if len(source_inputs) == 1:
-        parsed = _validate_source_llm_result(result, source_inputs[0].relative_path)
-        return [parsed]
-    if not isinstance(result, dict):
-        raise RepositoryError(
-            "llm_result must be a mapping with sources: [{'input_path': '<requested path>', "
-            "'summary': '<summary>', 'cleaned_content': '<content mentioning input_path>'}]"
-        )
-    sources = result.get("sources")
-    if not isinstance(sources, list) or len(sources) != len(source_inputs):
-        raise RepositoryError(
-            "llm_result.sources must match the requested source files; provide exactly one "
-            "result per requested input_path"
-        )
-
-    expected_paths = [source.relative_path for source in source_inputs]
-    by_path: dict[str, dict[str, Any]] = {}
-    for item in sources:
-        if not isinstance(item, dict):
-            raise RepositoryError(
-                "each source ingest result must be a mapping with input_path, summary, and "
-                "cleaned_content"
-            )
-        input_ref = item.get("input_path")
-        if not isinstance(input_ref, str):
-            raise RepositoryError("source ingest result must include input_path as a string")
-        if input_ref in by_path:
-            raise RepositoryError(f"duplicate source ingest result for input_path: {input_ref}")
-        by_path[input_ref] = _validate_source_llm_result(item, input_ref)
-
-    missing = sorted(set(expected_paths) - set(by_path))
-    extra = sorted(set(by_path) - set(expected_paths))
-    if missing or extra:
-        raise RepositoryError(
-            "source ingest results must exactly match requested input paths; missing="
-            f"{missing}, extra={extra}"
-        )
-    return [by_path[path] for path in expected_paths]
 
 
 def _validate_source_llm_result(
@@ -3892,7 +3489,7 @@ def _validate_source_llm_result(
     if not isinstance(result, dict):
         raise RepositoryError(
             "llm_result must be a mapping like {'input_path': '<requested path>', "
-            "'summary': '<summary>', 'cleaned_content': '<content mentioning input_path>'}"
+            "'summary': '<summary>'}"
         )
     if result.get("input_path") != expected_input_path:
         raise RepositoryError(
@@ -3900,104 +3497,74 @@ def _validate_source_llm_result(
             f"{expected_input_path!r}"
         )
     summary = result.get("summary")
-    cleaned_content = result.get("cleaned_content")
     if not isinstance(summary, str) or not summary.strip():
         raise RepositoryError("llm_result.summary must be a non-empty string")
-    if not isinstance(cleaned_content, str) or not cleaned_content.strip():
-        raise RepositoryError("llm_result.cleaned_content must be a non-empty string")
-    if expected_input_path not in cleaned_content:
-        raise RepositoryError(
-            "llm_result.cleaned_content must include the requested source input path"
-        )
-    for key in ("authors", "tags"):
-        if key in result and not _is_string_list(result[key]):
-            raise RepositoryError(f"llm_result.{key} must be a list of strings; use [] when empty")
+    if "tags" in result and not _is_string_list(result["tags"]):
+        raise RepositoryError("llm_result.tags must be a list of strings; use [] when empty")
     return result
 
 
-def _plan_source_records(
+def _plan_source_record(
     repository: ObjectRepository,
-    source_inputs: list[SourceInput],
-    parsed_sources: list[dict[str, Any]],
+    source_input: SourceInput,
+    parsed: dict[str, Any],
     title: str | None,
     tags: list[str] | None,
-    authors: list[str] | None,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     today = _today()
     reserved: set[str] = set()
-    records: list[dict[str, Any]] = []
-    for source_input, parsed in zip(source_inputs, parsed_sources, strict=True):
-        source_id = _next_id(repository, "source", reserved)
-        reserved.add(source_id)
-        cleaned_relative = f"data/cleaned/{source_id}.md"
-        source_relative = (
-            f"data/raw/pdf/{source_id}.pdf"
-            if source_input.source_kind == "pdf"
-            else f"data/raw/md/{source_id}.md"
-        )
-        metadata = {
-            "id": source_id,
-            "type": "source",
-            "title": title or parsed.get("title") or source_input.title_hint,
-            "source_type": source_input.source_kind,
-            "status": "raw",
-            "path": source_relative,
-            "summary": parsed["summary"],
-            "cleaned": {
-                "path": cleaned_relative,
-                "generated_at": today,
-                "method": "llm",
-                "input_path": source_input.relative_path,
-            },
-            "authors": authors or parsed.get("authors", []),
-            "published_at": parsed.get("published_at"),
-            "imported_at": today,
-            "deprecated_at": None,
-            "deprecated_reason": None,
-            "tags": tags or parsed.get("tags", []),
-            "created": today,
-            "updated": today,
-        }
-        records.append(
-            {
-                "source_id": source_id,
-                "source_input": source_input,
-                "source_relative": source_relative,
-                "cleaned_relative": cleaned_relative,
-                "metadata": metadata,
-                "parsed": parsed,
-            }
-        )
-    return records
+    source_id = _next_id(repository, "source", reserved)
+    source_relative = (
+        f"data/raw/pdf/{source_id}.pdf"
+        if source_input.source_kind == "pdf"
+        else f"data/raw/md/{source_id}.md"
+    )
+    metadata = {
+        "id": source_id,
+        "type": "source",
+        "title": title or parsed.get("title") or source_input.title_hint,
+        "source_type": source_input.source_kind,
+        "status": "raw",
+        "path": source_relative,
+        "summary": parsed["summary"],
+        "imported_at": today,
+        "deprecated_at": None,
+        "deprecated_reason": None,
+        "tags": tags or parsed.get("tags", []),
+        "created": today,
+        "updated": today,
+    }
+    return {
+        "source_id": source_id,
+        "source_input": source_input,
+        "source_relative": source_relative,
+        "metadata": metadata,
+        "parsed": parsed,
+    }
 
 
-def _write_source_records_atomic(
+def _write_source_record_atomic(
     workspace: Workspace,
     repository: ObjectRepository,
-    records: list[dict[str, Any]],
+    record: dict[str, Any],
 ) -> None:
     created: list[Path] = []
     try:
-        for record in records:
-            source_input = record["source_input"]
-            metadata = record["metadata"]
-            cleaned_path = workspace.ensure_parent(record["cleaned_relative"])
-            _write_new_text_atomic(cleaned_path, record["parsed"]["cleaned_content"])
-            created.append(cleaned_path)
-
-            if source_input.source_kind == "markdown":
-                original = source_input.path.read_text(encoding="utf-8")
-                path = repository.write_markdown(
-                    record["source_relative"],
-                    MarkdownDocument(frontmatter=metadata, body=f"\n## Source\n\n{original}"),
-                )
-                created.append(path)
-            else:
-                target = workspace.ensure_parent(record["source_relative"])
-                _copy_new_file_atomic(source_input.path, target)
-                created.append(target)
-                repository.write_meta(record["source_relative"], metadata)
-                created.append(target.with_suffix(".meta.yml"))
+        source_input = record["source_input"]
+        metadata = record["metadata"]
+        if source_input.source_kind == "markdown":
+            original = source_input.path.read_text(encoding="utf-8")
+            path = repository.write_markdown(
+                record["source_relative"],
+                MarkdownDocument(frontmatter=metadata, body=f"\n## Source\n\n{original}"),
+            )
+            created.append(path)
+        else:
+            target = workspace.ensure_parent(record["source_relative"])
+            _copy_new_file_atomic(source_input.path, target)
+            created.append(target)
+            repository.write_meta(record["source_relative"], metadata)
+            created.append(target.with_suffix(".meta.yml"))
     except Exception:
         _rollback_created(created)
         raise

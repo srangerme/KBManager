@@ -109,7 +109,7 @@ def test_knowledgebase_workflow_does_not_ingest_source_context() -> None:
     assert "不得调用 `kb.source.add`" in knowledgebase_skill
     assert "不得调用 `kb.candidate.create`" in knowledgebase_skill
     assert "改用 kbm-kb 而不是 source lifecycle" in source_skill
-    assert "不创建 source/candidate" in knowledgebase_skill
+    assert "不创建持久 source/candidate" in knowledgebase_skill
     assert "不得调用 `kb.source.add`" in kb_reference
     assert "不得调用 `kb.candidate.create`" in kb_reference
 
@@ -143,7 +143,6 @@ def test_api_references_are_split_by_operation() -> None:
             "kb.note.get.md",
         },
         "kbm-maintenance": {
-            "kb.clean.inspect.md",
             "kb.index.rebuild.md",
             "kb.init.md",
         },
@@ -176,7 +175,7 @@ def test_api_references_are_split_by_operation() -> None:
         REPO_ROOT / "skills/kbm-candidate/references/kb.knowledge.accept.md"
     ).read_text(encoding="utf-8")
 
-    assert "当前实现只支持本地 `.md` 和 `.pdf` 文件" in source_reference
+    assert "当前实现只支持本地 `.md` 和 `.pdf` 单文件" in source_reference
     assert "最终写入会由 Claude Code PreToolUse hook 触发审批" in candidate_reference
 
 
@@ -452,7 +451,6 @@ def test_command_api_operations_are_supported_by_plugin_helper() -> None:
         "kb.candidate.create",
         "kb.note.add",
         "kb.index.rebuild",
-        "kb.clean.inspect",
     }:
         assert operation in supported
 

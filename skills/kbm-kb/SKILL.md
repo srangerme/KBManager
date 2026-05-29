@@ -54,7 +54,7 @@ flowchart TD
 
 最终 `kb.knowledgebase.create` 会由 Claude Code PreToolUse hook 触发审批并展示最终写入请求；hook note 只回流到 revise，不表示原 API 已执行。
 
-用户给出的 source、file 或 directory 只是临时定义上下文。此工作流不创建 source/candidate，不得调用 `kb.source.add`，不得调用 `kb.candidate.create`，不得写入 `data/raw` 或 `data/cleaned`，也不得把该 input 记录为 candidate/knowledge evidence。
+用户给出的 source、file 或 directory 只是临时定义上下文。此工作流不创建持久 source/candidate，不得调用 `kb.source.add`，不得调用 `kb.candidate.create`，也不得把该 input 记录为 candidate/knowledge evidence。
 
 ## Knowledgebase 列表和查看
 

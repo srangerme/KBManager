@@ -156,7 +156,6 @@ class InteractionInterface:
         *,
         title: str | None = None,
         tags: list[str] | None = None,
-        authors: list[str] | None = None,
         user_prompt: str | None = None,
         reviewed_user_prompt: str | dict[str, Any] | None = None,
         confirm_user_prompt: bool = False,
@@ -214,7 +213,6 @@ class InteractionInterface:
             input_path=input_path,
             title=title,
             tags=tags,
-            authors=authors,
         )
         if source["status"] != ApiStatus.NEEDS_LLM.value:
             return self._from_api_result(source, calls, "Source add did not reach LLM boundary.")
@@ -237,7 +235,6 @@ class InteractionInterface:
             input_path=input_path,
             title=title,
             tags=tags,
-            authors=authors,
             resume_token=source["resume"]["token"],
             llm_result=source_llm_result,
         )
@@ -663,19 +660,6 @@ class InteractionInterface:
         result = self._call(calls, "kb.index.rebuild")
         return self._from_api_result(result, calls, "Rebuilt indexes and checked consistency.")
 
-    def kb_clean(self) -> InterfaceResult:
-        calls: list[ApiCallRecord] = []
-        result = self._call(calls, "kb.clean.inspect")
-        if result["status"] == ApiStatus.NEEDS_LLM.value:
-            llm_result = self._complete_llm(
-                "clean_migration_plan",
-                result.get("llm_request"),
-                {"differences": result.get("llm_request", {}).get("prompt", "")},
-            )
-            result = dict(result)
-            result["migration_plan"] = llm_result
-        return self._from_api_result(result, calls, "Inspected workspace for clean migration.")
-
     def _call(self, calls: list[ApiCallRecord], operation: str, **kwargs: Any) -> dict[str, Any]:
         result = self.api.call(operation, **kwargs)
         calls.append(ApiCallRecord(operation, result.get("status", "unknown")))
@@ -1006,5 +990,4 @@ _APPLICATION_OPERATIONS = {
     "kb.note.get": application.note_get,
     "kb.note.deprecate": application.note_deprecate,
     "kb.index.rebuild": application.index_rebuild,
-    "kb.clean.inspect": application.clean_inspect,
 }
