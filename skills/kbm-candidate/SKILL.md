@@ -3,15 +3,19 @@ name: kbm-candidate
 description: 创建、查看、排队、审核、接受、拒绝、延后、合并或废弃 KBManager candidates 与 accepted knowledge。覆盖 candidate review 决策及其产生的 knowledge 生命周期动作。
 ---
 
-# KBManager Candidate And Knowledge Review Workflows
+# KBManager Candidate 与 Knowledge 审核工作流
 
 使用此 skill 时，必须明确告诉用户：`Using skill: kbm-candidate`。
 
-执行此 skill 的任何工作流前，必须先阅读 `kbm-usage`。
+执行具体 workflow 时，只读取该小节列出的 API reference。
 
 此 skill 覆盖 candidate create/get/next pending/review，以及 accepted knowledge 的 merge/deprecate 等 review-gated 动作。
 
-## Candidate Create
+## Candidate 创建
+
+本流程引用：
+
+- `references/kb.candidate.create.md`
 
 ### 意图流程图
 
@@ -31,9 +35,20 @@ flowchart TD
 - 只创建 pending candidates，不创建 accepted knowledge。
 - 没有 review gate，但可能返回 deprecated source warnings。
 
-## Candidate Review
+## Candidate 审核
 
 当用户想要 accept、reject、defer、merge、approve、revise 或以其他方式 review pending candidate 时使用。
+
+没有明确用户决定时，绝不 accept、reject、defer 或 merge。
+
+本流程引用：
+
+- `references/kb.candidate.next_pending.md`
+- `references/kb.candidate.get.md`
+- `references/kb.knowledge.reject.md`
+- `references/kb.candidate.defer.md`
+- `references/kb.knowledge.accept.md`
+- `references/kb.knowledge.merge.md`
 
 ### 意图流程图
 
@@ -67,14 +82,23 @@ flowchart TD
 5. 调用匹配的 review-gated API。
 6. 报告 accepted、rejected、deferred 或 merged 的 IDs、updated paths、warnings 和 next actions。
 
-## Candidate Get And Next Pending
+## Candidate 获取和下一个 Pending
+
+本流程引用：
+
+- `references/kb.candidate.next_pending.md`
+- `references/kb.candidate.get.md`
 
 - 对指定 candidate 使用 `kb.candidate.get`。
 - 当用户要求“下一个”“继续审核”“next pending”“review queue”时，使用 `kb.candidate.next_pending`。
 - 两者都是只读操作；展示 candidate content、summary、evidence、bindto、outline change suggestions 和 review state。
 - 展示时不要把 index 内容当作事实；candidate object 是事实来源。
 
-## Accept Candidate
+## 接受 Candidate
+
+本流程引用：
+
+- `references/kb.knowledge.accept.md`
 
 - 使用 `kb.knowledge.accept`。
 - 需要明确 `decision: "accept"`。
@@ -83,19 +107,31 @@ flowchart TD
 - Bindto 必须引用存在的 knowledgebase、outline 和 node。
 - 成功后 pending candidate 被 promote/move 为同 ID accepted knowledge；不要保留同 ID candidate。
 
-## Reject Candidate
+## 拒绝 Candidate
+
+本流程引用：
+
+- `references/kb.knowledge.reject.md`
 
 - 使用 `kb.knowledge.reject`。
 - 需要明确 `decision: "reject"`，建议提供 reason。
 - 成功后 candidate 移动到 rejected；不生成 accepted knowledge。
 
-## Defer Candidate
+## 延后 Candidate
+
+本流程引用：
+
+- `references/kb.candidate.defer.md`
 
 - 使用 `kb.candidate.defer`。
 - 需要明确 `decision: "defer"`，建议提供 reason。
 - 成功后 candidate 移动到 deferred；后续可由人工或未来 workflow 重新处理。
 
-## Merge Candidate Into Knowledge
+## 合并 Candidate 到 Knowledge
+
+本流程引用：
+
+- `references/kb.knowledge.merge.md`
 
 - 使用 `kb.knowledge.merge`。
 - 需要 pending candidate ID、accepted target knowledge ID、明确 `decision: "merge"`。
@@ -104,7 +140,7 @@ flowchart TD
 - 成功后 target knowledge 更新，source candidate 以 rejected/merge decision 保留审计记录。
 - Merge 结果使用 target knowledge ID，不使用 candidate ID 作为正式 knowledge ID。
 
-## Review Assist Rules
+## 审核辅助规则
 
 - Review assist 是只读辅助，只能帮助用户检查 summary、evidence、bindto、outline suggestions、风险和不确定点。
 - 不要修改 KBManager object files。
@@ -114,7 +150,11 @@ flowchart TD
 - Suggested `bindto` 只是建议；最终 `bindto` 必须来自用户 reviewed content。
 - 如果 candidate 包含 `outline_change_suggestions`，只说明影响；不要修改 knowledgebase outline，也不要把 outline 修改呈现为已批准。
 
-## Deprecate Accepted Knowledge
+## 废弃 Accepted Knowledge
+
+本流程引用：
+
+- `references/kb.knowledge.deprecate.md`
 
 ### 意图流程图
 
@@ -133,7 +173,7 @@ flowchart TD
 - 不要删除 knowledge；deprecated knowledge 保留历史事实和引用链。
 - 展示 deprecated knowledge 时明确标记过时或不推荐。
 
-## Evidence And Bindto Rules
+## Evidence 和 Bindto 规则
 
 - Candidate 和 knowledge evidence 必须可追溯到 upstream source。
 - Evidence item 必须包含 source/object ID、locator，以及 quote、excerpt 或 snippet。

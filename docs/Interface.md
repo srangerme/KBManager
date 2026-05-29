@@ -3,7 +3,7 @@
 本文定义第一层 Interaction & Orchestration。第一层由 Claude Code UI、
 `kbm-*` skills、自然语言交互、结果展示和 user review 组成，负责把用户意图编排为第二层 `kb.*` API 调用。
 
-除 clean 迁移执行和 `kbm-kb-outline` 明确触发的 outline YAML 更新特许例外外，第一层不直接修改 Markdown/PDF/YAML 对象
+除 clean 迁移执行和 `kbm-kb` 明确触发的 outline YAML 更新特许例外外，第一层不直接修改 Markdown/PDF/YAML 对象
 文件，不直接维护对象状态机。所有知识库数据变更必须通过第二层 API 完成。
 
 ## 1. 第一层职责
@@ -21,7 +21,7 @@
 
 第一层不得：
 
-- 绕过 API 直接创建、修改、移动、删除对象文件；clean 迁移执行和 `kbm-kb-outline` 的受控 outline YAML 更新除外。
+- 绕过 API 直接创建、修改、移动、删除对象文件；clean 迁移执行和 `kbm-kb` 的受控 outline YAML 更新除外。
 - 绕过 user review 修改正式 knowledge。
 - 把索引文件当作事实来源。
 - 在 check 中自动修复对象文件。
@@ -44,14 +44,15 @@ skill workflow 或自然语言意图存在。
 
 所有 KBManager skill 名称必须以 `kbm-` 开头。
 
-- `kbm-basic`：目录结构、对象边界、文件职责、通用规则、禁令和受控直接编辑例外。
 - `kbm-source`：source add、source deprecate。
 - `kbm-candidate`：candidate create/get/next pending/review。
 - `kbm-note`：note add/get/list/view/deprecate。
-- `kbm-kb`：knowledgebase create/list/map。
-- `kbm-kb-outline`：outline create/set-default/archive，以及用户显式要求时的受控 outline YAML 更新。
+- `kbm-kb`：knowledgebase create/list/map、outline create/set-default/archive，以及用户显式要求时的受控 outline YAML 更新。
 - `kbm-maintenance`：init、check、clean inspect 和 clean migration。
 - `kbm-research-on`：根据 knowledgebase 的 `description`、`scope` 和 outline 生成 Deep Research prompt。
+- `kbm-download-paper-pdf`：下载无需凭证的合法公开论文 PDF。
+
+每个领域 skill 的 `SKILL.md` 承载高层意图流程。`references/` 目录按 `kb.*` API 拆分，承载对应 API 的 payload、result fields、resume/review 约束和 hard rules；不再使用单独的 global usage skill。
 
 内嵌在流程里的 LLM 能力不称为 skill。它们是 `system-prompts/` internal prompt module，由 API `needs_llm` 或第一层 workflow 固定触发。
 

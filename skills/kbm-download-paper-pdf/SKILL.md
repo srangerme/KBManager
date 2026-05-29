@@ -3,14 +3,14 @@ name: kbm-download-paper-pdf
 description: 根据论文标题、DOI、URL、arXiv ID、PMCID、citation 或 BibTeX 查找并下载合法公开 PDF。仅使用无需登录、API key、邮箱、VPN、代理或人工请求的来源。
 ---
 
-# KBManager Download Paper PDF
+# KBManager 下载论文 PDF
 
 使用此 skill 时，必须明确告诉用户：`Using skill: kbm-download-paper-pdf`。
 
 根据用户给出的论文信息查找合法公开 PDF，并在找到时下载到
 `/tmp/kbm-downloads/<paper-title>.pdf`。
 
-## Boundaries
+## 边界
 
 - 只使用无需邮箱、API key、登录、cookie、VPN、library proxy、订阅权限或人工请求的公开合法来源。
 - 不使用 Sci-Hub、LibGen、盗版镜像、paywall bypass、破解代理、登录会话、学校 VPN、EZproxy、Shibboleth、ResearchGate full-text request 或联系作者邮件。
@@ -18,17 +18,17 @@ description: 根据论文标题、DOI、URL、arXiv ID、PMCID、citation 或 Bi
 - 不把下载到 `/tmp/kbm-downloads` 的 PDF 自动登记为 KBManager source；只有用户另行要求导入 KBManager 时，才切换到 `kbm-source` workflow。
 - 如果找不到合法公开 PDF，不要下载 publisher landing page、HTML、abstract page 或非论文附件来冒充 PDF。
 
-## Inputs
+## 输入
 
 用户输入可能是：
 
 - DOI；
 - arXiv URL 或 arXiv ID；
 - PubMed Central PMCID；
-- title；
-- title + authors/year；
-- publisher URL；
-- author/project/lab/GitHub/Papers With Code URL；
+- 论文标题；
+- 论文标题 + 作者/年份；
+- 出版商 URL；
+- 作者/项目/实验室/GitHub/Papers With Code URL；
 - BibTeX、citation 或混合文本。
 
 先提取并记录可用 paper metadata：
@@ -43,11 +43,11 @@ description: 根据论文标题、DOI、URL、arXiv ID、PMCID、citation 或 Bi
 
 如果 title/DOI/arXiv/PMCID 均无法确定，先向用户说明缺少可检索信息，并请求更完整的 title、DOI 或 URL。
 
-## Legal Search Order
+## 合法检索顺序
 
 按以下顺序查找合法公开 PDF。每一步只使用公开网页或无需凭证的公开 API。
 
-1. **Direct PDF URL**
+1. **直接 PDF URL**
    - 如果输入 URL 本身疑似 PDF，先验证它是公开 PDF。
    - URL 后缀 `.pdf` 不足以证明；仍需验证 `Content-Type` 或文件头。
 
@@ -70,11 +70,11 @@ description: 根据论文标题、DOI、URL、arXiv ID、PMCID、citation 或 Bi
    - 用 DOI/title 查询公开可见结果。
    - 只使用明确公开的 `openAccessPdf` 或页面中公开指向的 PDF。
 
-6. **HAL, OSF, Institutional Repositories**
+6. **HAL、OSF、机构仓库**
    - 查找 HAL、OSF、MIT DSpace、Stanford Digital Repository、CMU RI Repository、ETH Research Collection、Berkeley eScholarship 等机构仓库。
    - 只下载仓库页面公开提供的 author manuscript、accepted manuscript 或 published OA PDF。
 
-7. **Author/Lab/Project Pages**
+7. **作者、实验室和项目页面**
    - 查找作者主页、实验室主页、项目页、课程页或论文列表。
    - 只下载作者或项目页面公开链接的 PDF。
 
@@ -82,7 +82,7 @@ description: 根据论文标题、DOI、URL、arXiv ID、PMCID、citation 或 Bi
    - 使用 Papers With Code、GitHub README、release、project page 中公开链接的 PDF。
    - GitHub 附带 PDF 必须是论文 PDF，而不是无关 supplementary、slides 或 report，除非用户明确接受。
 
-## Download Procedure
+## 下载流程
 
 1. 创建下载目录：
 
@@ -119,12 +119,12 @@ description: 根据论文标题、DOI、URL、arXiv ID、PMCID、citation 或 Bi
    - 检查文件头包含 `%PDF`。
    - 如果验证失败，删除该失败文件，并继续尝试下一个合法候选。
 
-## Reporting
+## 报告
 
 成功时报告：
 
-- saved path；
-- paper title；
+- 保存路径；
+- 论文标题；
 - authors/year，如已知；
 - DOI/arXiv/PMCID，如已知；
 - PDF 来源 URL；

@@ -3,17 +3,21 @@ name: kbm-kb
 description: 创建、查看、映射或维护 KBManager knowledgebase 与 outline，包括 scope、tags、default outline、taxonomy nodes 和 outline YAML edits。仅作为 KB 定义上下文的材料不触发 source 摄取。
 ---
 
-# KBManager Knowledgebase And Outline Workflows
+# KBManager Knowledgebase 与 Outline 工作流
 
 使用此 skill 时，必须明确告诉用户：`Using skill: kbm-kb`。
 
-执行此 skill 的任何工作流前，必须先阅读 `kbm-usage`。
+执行具体 workflow 时，只读取该小节列出的 API reference。
 
 此 skill 覆盖所有 KB 相关工作流：knowledgebase create/list/map，以及 outline create/set-default/archive 和用户明确要求时的 outline YAML 受控维护。
 
-## Knowledgebase Create
+## Knowledgebase 创建
 
 用于创建新的 active knowledgebase 和配套 outlines YAML。
+
+本流程引用：
+
+- `references/kb.knowledgebase.create.md`
 
 ### 意图流程图
 
@@ -40,9 +44,11 @@ flowchart TD
 
 Knowledgebase create 需要 review gate。
 
-用户给出的 source、file 或 directory 只是临时定义上下文。此工作流不得调用 `kb.source.add`，不得调用 `kb.candidate.create`，不得写入 `data/raw` 或 `data/cleaned`，也不得把该 input 记录为 candidate/knowledge evidence。
+用户给出的 source、file 或 directory 只是临时定义上下文。此工作流不创建 source/candidate，不得调用 `kb.source.add`，不得调用 `kb.candidate.create`，不得写入 `data/raw` 或 `data/cleaned`，也不得把该 input 记录为 candidate/knowledge evidence。
 
-## Knowledgebase List And View
+## Knowledgebase 列表和查看
+
+本流程引用：无。此流程只读读取 object files 或 derived indexes。
 
 ### 意图流程图
 
@@ -60,7 +66,11 @@ flowchart TD
 - 展示 deprecated、archived 或 inactive 状态时明确标记。
 - List/view 不修改 objects，不运行 write APIs。
 
-## Knowledgebase Map
+## Knowledgebase 映射
+
+本流程引用：
+
+- `references/kb.knowledgebase.map.md`
 
 ### 意图流程图
 
@@ -81,7 +91,11 @@ flowchart TD
 - 没有 review gate。
 - 报告 map path、warnings、issues 和可展示的 markdown。
 
-## Outline Create
+## Outline 创建
+
+本流程引用：
+
+- `references/kb.knowledgebase.outline.create.md`
 
 ### 意图流程图
 
@@ -104,7 +118,11 @@ flowchart TD
 - 获得明确 approve 后调用 `kb.knowledgebase.outline.create`。
 - 需要 review gate。
 
-## Outline Set Default
+## 设置默认 Outline
+
+本流程引用：
+
+- `references/kb.knowledgebase.outline.set_default.md`
 
 ### 意图流程图
 
@@ -125,7 +143,11 @@ flowchart TD
 - 获得批准后调用 `kb.knowledgebase.outline.set_default`。
 - 需要 review gate。
 
-## Outline Archive
+## Outline 归档
+
+本流程引用：
+
+- `references/kb.knowledgebase.outline.archive.md`
 
 ### 意图流程图
 
@@ -153,7 +175,9 @@ flowchart TD
 - 获得批准后调用 `kb.knowledgebase.outline.archive`。
 - 需要 review gate。
 
-## Outline YAML Direct-Edit Exception
+## Outline YAML 直接编辑例外
+
+本流程引用：无。此流程是受控 direct-edit exception，不是 `kb.*` API。
 
 仅当用户明确要求编辑/更新/重排/重命名/移动/拆分/合并现有 outline YAML nodes 时使用。这是 LLM 辅助 outline 维护的受控直接编辑例外。
 
@@ -169,7 +193,7 @@ flowchart TD
 - 编辑后通过 `kb.index.rebuild` 或 `/kbm:ask` check workflow 验证。
 - 报告 changed node IDs、preserved IDs、removed IDs、binding risks 和建议修复。
 
-## Scope And Binding Rules
+## Scope 和 Binding 规则
 
 - Knowledgebase scope 用 `includes` 和 `excludes` 表示边界。
 - Outline 是组织结构，不是 evidence。

@@ -3,15 +3,19 @@ name: kbm-maintenance
 description: 初始化、检查、重建索引、检查 layout/schema drift，或执行已批准的 clean migration。仅覆盖 workspace 维护，不处理普通对象内容编辑。
 ---
 
-# KBManager Maintenance Workflows
+# KBManager Maintenance 工作流
 
 使用此 skill 时，必须明确告诉用户：`Using skill: kbm-maintenance`。
 
-执行此 skill 的任何工作流前，必须先阅读 `kbm-usage`。
+执行具体 workflow 时，只读取该小节列出的 API reference。
 
 此 skill 覆盖 init、check/index rebuild、clean inspect 和 clean migration execution。
 
-## Init
+## 初始化
+
+本流程引用：
+
+- `references/kb.init.md`
 
 ### 意图流程图
 
@@ -28,7 +32,11 @@ flowchart TD
 - 实际执行不得覆盖已有用户文件；初始化必须幂等。
 - 报告 created structure、existing paths、conflicts、warnings 和 next actions。
 
-## Check And Index Rebuild
+## Check 和 Index Rebuild
+
+本流程引用：
+
+- `references/kb.index.rebuild.md`
 
 ### 意图流程图
 
@@ -45,7 +53,12 @@ flowchart TD
 - 可使用 `scope` 和 `object_id` 限定范围。
 - 除非用户请求单独 reviewed workflow，否则不要自动修复 object files。
 
-## Clean Inspect And Migration
+## Clean Inspect 和 Migration
+
+本流程引用：
+
+- `references/kb.clean.inspect.md`
+- `references/kb.index.rebuild.md`
 
 ### 意图流程图
 
@@ -70,12 +83,12 @@ flowchart TD
 - 如果有差异，API 可返回 `needs_llm` 生成 clean migration plan。
 - 报告 differences、warnings、migration_required 和 next actions。
 - 只有在完整 migration plan 已展示在 Claude Code UI 且用户明确批准后，才可以执行。
-- Clean migration execution 是 `kbm-usage` 定义的受控 direct-edit exception。
+- Clean migration execution 是受控 direct-edit exception。
 - 执行时严格按 approved plan 修改，不夹带无关重构。
 - 不物理删除业务对象，除非 approved plan 明确处理非对象临时/派生产物且不会破坏引用链。
 - 执行后运行 `kb.index.rebuild` 或等价 check，报告 changed paths、remaining issues 和 warnings。
 
-## Boundaries
+## 边界
 
 - Maintenance workflows 负责结构、一致性、索引和迁移，不负责普通 source/candidate/knowledge/note/KB 内容编辑。
 - Indexes 是派生文件；不要把 index 内容作为事实写回 objects。

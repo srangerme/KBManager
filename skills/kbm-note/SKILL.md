@@ -3,15 +3,19 @@ name: kbm-note
 description: 添加、命名、列出、查看或废弃 KBManager note，用于个人观察、临时笔记和工作记录。Note 不作为 source evidence、candidate input 或正式 knowledge evidence。
 ---
 
-# KBManager Note Workflows
+# KBManager Note 工作流
 
 使用此 skill 时，必须明确告诉用户：`Using skill: kbm-note`。
 
-执行此 skill 的任何工作流前，必须先阅读 `kbm-usage`。
+执行具体 workflow 时，只读取该小节列出的 API reference。
 
 此 skill 覆盖 note add、title generation、get/list/view 和 deprecate。
 
-## Note Add
+## Note 添加
+
+本流程引用：
+
+- `references/kb.note.add.md`
 
 ### 意图流程图
 
@@ -34,7 +38,9 @@ flowchart TD
 
 Note add 没有 review gate。不要把 note content 改写成 source、candidate 或 knowledge，除非用户另行发起对应 workflow。
 
-## Note List
+## Note 列表
+
+本流程引用：无。此流程只读读取 `indexes/note-index.md`。
 
 ### 意图流程图
 
@@ -50,7 +56,11 @@ flowchart TD
 - 展示 deprecated notes 时标记为 deprecated/outdated。
 - 不要将 note index 当作 candidate creation evidence。
 
-## Note View
+## Note 查看
+
+本流程引用：
+
+- `references/kb.note.get.md`
 
 ### 意图流程图
 
@@ -66,7 +76,11 @@ flowchart TD
 - 不要用 summary 替代 note body。
 - 不要编辑 note files。
 
-## Note Deprecate
+## Note 废弃
+
+本流程引用：
+
+- `references/kb.note.deprecate.md`
 
 ### 意图流程图
 
@@ -88,7 +102,7 @@ flowchart TD
 
 Note deprecate 需要 review gate。不要物理删除 note。
 
-## Boundaries
+## 边界
 
 - Notes 是个人记录，不是 source lifecycle input。
 - 从 note 生成 candidate 或 knowledge 不属于当前实现；如用户想把笔记变成知识，必须先明确转换策略，不能直接把 note 当 evidence。

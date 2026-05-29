@@ -10,7 +10,8 @@ a public CLI.
 The repository root is the plugin root:
 
 - `.claude-plugin/plugin.json`: plugin manifest.
-- `skills/kbm-*`: operating knowledge for API calls, workflows, rules, Deep Research, and controlled outline updates.
+- `skills/kbm-*`: domain skills plus API-specific `references/` files for
+  payloads, result fields, rules, Deep Research, and controlled outline updates.
 - `scripts/kbmanager_plugin.py`: internal JSON bridge to the `kb.*` API.
 - `src/kbmanager/`: KBManager core.
 - `system-prompts/`: built-in LLM prompts used by API and workflow boundaries.
@@ -22,7 +23,6 @@ The plugin package must not include command files or user workspace data such as
 
 All KBManager skills use the `kbm-` prefix:
 
-- `kbm-usage`: global object boundaries, API payload/result rules, write boundaries, review gates, and helper invocation rules.
 - `kbm-source`: source add and source deprecate workflows.
 - `kbm-candidate`: candidate create, get, next pending, and review workflows.
 - `kbm-note`: note add, get, list, view, and deprecate workflows.
@@ -30,6 +30,10 @@ All KBManager skills use the `kbm-` prefix:
 - `kbm-maintenance`: init, check, clean inspect, and clean migration workflows.
 - `kbm-research-on`: generate a Deep Research prompt from a knowledgebase.
 - `kbm-download-paper-pdf`: find and download legal public paper PDFs to `/tmp/kbm-downloads` without using credentials, login, library access, or paywall bypasses.
+
+High-level workflow intent stays in each `SKILL.md`. API payloads, result
+fields, resume/review constraints, and hard rules live in API-specific files in
+each domain skill's `references/` directory.
 
 Internal LLM steps such as source ingest, candidate creation, note title
 generation, clean migration planning, and knowledgebase drafting remain

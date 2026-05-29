@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
 def test_claude_plugin_manifest_is_valid_json() -> None:
     manifest = json.loads((REPO_ROOT / ".claude-plugin/plugin.json").read_text())
 
@@ -30,7 +32,6 @@ def test_claude_plugin_packages_kbm_skills() -> None:
         "kbm-note",
         "kbm-research-on",
         "kbm-source",
-        "kbm-usage",
     }
     for name in skill_names:
         text = (REPO_ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
@@ -45,16 +46,103 @@ def test_knowledgebase_workflow_does_not_ingest_source_context() -> None:
     source_skill = (REPO_ROOT / "skills/kbm-source/SKILL.md").read_text(
         encoding="utf-8"
     )
-    api_catalog = (REPO_ROOT / "skills/kbm-usage/SKILL.md").read_text(
-        encoding="utf-8"
-    )
+    kb_reference = (
+        REPO_ROOT / "skills/kbm-kb/references/kb.knowledgebase.create.md"
+    ).read_text(encoding="utf-8")
+    source_reference = (
+        REPO_ROOT / "skills/kbm-source/references/kb.source.add.md"
+    ).read_text(encoding="utf-8")
 
-    for text in (knowledgebase_skill, source_skill, api_catalog):
+    for text in (knowledgebase_skill, source_skill, kb_reference, source_reference):
         assert "kb.source.add" in text
     assert "不得调用 `kb.source.add`" in knowledgebase_skill
     assert "不得调用 `kb.candidate.create`" in knowledgebase_skill
     assert "改用 kbm-kb 而不是 source lifecycle" in source_skill
-    assert "不创建 source/candidate" in api_catalog
+    assert "不创建 source/candidate" in knowledgebase_skill
+    assert "不得调用 `kb.source.add`" in kb_reference
+    assert "不得调用 `kb.candidate.create`" in kb_reference
+
+
+def test_api_references_are_split_by_operation() -> None:
+    expected_references = {
+        "kbm-source": {"kb.source.add.md", "kb.source.deprecate.md"},
+        "kbm-candidate": {
+            "kb.candidate.create.md",
+            "kb.candidate.defer.md",
+            "kb.candidate.get.md",
+            "kb.candidate.next_pending.md",
+            "kb.knowledge.accept.md",
+            "kb.knowledge.deprecate.md",
+            "kb.knowledge.merge.md",
+            "kb.knowledge.reject.md",
+        },
+        "kbm-kb": {
+            "kb.knowledgebase.create.md",
+            "kb.knowledgebase.map.md",
+            "kb.knowledgebase.outline.archive.md",
+            "kb.knowledgebase.outline.create.md",
+            "kb.knowledgebase.outline.set_default.md",
+        },
+        "kbm-note": {
+            "kb.note.add.md",
+            "kb.note.deprecate.md",
+            "kb.note.get.md",
+        },
+        "kbm-maintenance": {
+            "kb.clean.inspect.md",
+            "kb.index.rebuild.md",
+            "kb.init.md",
+        },
+    }
+
+    for skill, references in expected_references.items():
+        reference_dir = REPO_ROOT / "skills" / skill / "references"
+        assert {path.name for path in reference_dir.iterdir()} == references
+        for reference in references:
+            text = (reference_dir / reference).read_text(encoding="utf-8")
+            assert "## 用途" in text
+            assert "## 载荷" in text
+            assert "## 硬规则" in text
+            assert "流程：" not in text
+
+    for old_reference in {
+        "skills/kbm-source/references/source-workflows.md",
+        "skills/kbm-candidate/references/candidate-review-workflows.md",
+        "skills/kbm-kb/references/kb-outline-workflows.md",
+        "skills/kbm-note/references/note-workflows.md",
+        "skills/kbm-maintenance/references/maintenance-workflows.md",
+        "skills/kbm-research-on/references/research-on-workflow.md",
+    }:
+        assert not (REPO_ROOT / old_reference).exists()
+
+    source_reference = (
+        REPO_ROOT / "skills/kbm-source/references/kb.source.add.md"
+    ).read_text(encoding="utf-8")
+    candidate_reference = (
+        REPO_ROOT / "skills/kbm-candidate/references/kb.knowledge.accept.md"
+    ).read_text(encoding="utf-8")
+
+    assert "不得自行下载、打开、浏览、打印、导出、抓取、保存或重试" in (
+        source_reference
+    )
+    assert "必须等待用户 approve 或 edited reviewed content" in candidate_reference
+
+
+def test_skills_reference_api_files_from_workflows() -> None:
+    source_skill = (REPO_ROOT / "skills/kbm-source/SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    candidate_skill = (REPO_ROOT / "skills/kbm-candidate/SKILL.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "意图流程图" in source_skill
+    assert "references/kb.source.add.md" in source_skill
+    assert "../kbm-candidate/references/kb.candidate.create.md" in source_skill
+    assert "references/kb.knowledge.accept.md" in candidate_skill
+    assert "没有明确用户决定时，绝不 accept、reject、defer 或 merge" in (
+        candidate_skill
+    )
 
 
 def test_register_marketplace_script_adds_current_plugin(tmp_path: Path) -> None:
@@ -74,7 +162,7 @@ def test_register_marketplace_script_adds_current_plugin(tmp_path: Path) -> None
     assert plugin_root.is_dir()
     assert not plugin_root.is_symlink()
     assert not (plugin_root / "commands").exists()
-    assert (plugin_root / "skills/kbm-usage/SKILL.md").is_file()
+    assert (plugin_root / "skills/kbm-source/references/kb.source.add.md").is_file()
     assert (plugin_root / "scripts/kbmanager_plugin.py").is_file()
     assert (plugin_root / "src/kbmanager/application.py").is_file()
     assert (plugin_root / "system-prompts/source-ingest.md").is_file()
