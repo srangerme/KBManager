@@ -213,11 +213,11 @@ def test_knowledgebase_create_orchestrates_single_create_review(tmp_path: Path) 
     (tmp_path / "input.md").write_text("# KB seed\n\n- Topic A\n", encoding="utf-8")
     api = MockApi(
         {
-            "kb.knowledgebase.create": [
-                _needs_llm("kb.knowledgebase.create", "kb-token"),
+            "kb.knowledgebase.create.prepare": [
+                _needs_llm("kb.knowledgebase.create.prepare", "kb-token"),
                 _api_result(
-                    "needs_review",
-                    "kb.knowledgebase.create",
+                    "success",
+                    "kb.knowledgebase.create.prepare",
                     reviewed_payload={
                         "description": "d",
                         "tags": [],
@@ -264,10 +264,10 @@ def test_knowledgebase_create_orchestrates_single_create_review(tmp_path: Path) 
 
     assert result.to_dict()["status"] == "needs_review"
     assert [call[0] for call in api.calls] == [
-        "kb.knowledgebase.create",
-        "kb.knowledgebase.create",
+        "kb.knowledgebase.create.prepare",
+        "kb.knowledgebase.create.prepare",
     ]
-    assert llm.calls[0]["llm_request"]["purpose"] == "kb.knowledgebase.create"
+    assert llm.calls[0]["llm_request"]["purpose"] == "kb.knowledgebase.create.prepare"
 
 
 def test_read_only_list_workflows_display_markdown(tmp_path: Path) -> None:

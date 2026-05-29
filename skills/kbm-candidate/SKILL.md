@@ -62,28 +62,32 @@ flowchart TD
   C --> D["(api) kb.candidate.get"]
   B -- 是 --> D
   D --> E["(ask) 在 Claude Code UI 展示 candidate Markdown、evidence、bindto 和 outline suggestions"]
-  E --> F["(ask) 按 candidate skill 规则生成只读 review assist"]
+  E --> F["(ask) 仅在用户要求时生成只读 review assist"]
   F --> G{"(user) 选择一个决定"}
   G -- reject --> H["(api) kb.knowledge.reject"]
   G -- defer --> I["(api) kb.candidate.defer"]
-  G -- accept --> J["(ask) 展示 reviewed Markdown draft"]
-  J --> K["(user) approve 或编辑 reviewed payload"]
-  K --> L["(api) kb.knowledge.accept"]
-  G -- merge --> M["(ask) 询问 target knowledge ID 并展示 merge draft"]
-  M --> N["(user) approve 或编辑 reviewed payload"]
-  N --> O["(api) kb.knowledge.merge"]
+  G -- accept --> J["(prepare) 准备最终写入 payload"]
+  J --> K["(api) kb.knowledge.accept"]
+  K -- hook reject + note --> R["(api) kb.candidate.review.revise"]
+  R --> K
+  G -- merge --> M["(prepare) 询问 target knowledge ID 并准备 merge payload"]
+  M --> N["(api) kb.knowledge.merge"]
+  N -- hook reject + note --> R
+  H -- hook reject + note --> Q["(ask) 将 note 作为 reason/意图澄清后等待用户再次明确"]
+  I -- hook reject + note --> Q
   H --> P["(ask) 汇报结果和自动 index rebuild"]
   I --> P
-  L --> P
-  O --> P
+  K --> P
+  N --> P
 ```
 
 1. 获取 candidate，或使用 next pending。
-2. 可选生成只读 review assistance；review assistance 不是用户批准。
+2. 默认不生成 LLM review assistance；只有用户明确要求解释、检查风险或辅助判断时，才生成只读 review assistance。review assistance 不是用户批准。
 3. 在 Claude Code UI 中展示 candidate content、summary、evidence、bindto suggestions、outline suggestions 和可选决定。
-4. 收集明确用户决定，或收集用户编辑后的 reviewed payload。
-5. 调用匹配的 review-gated API。
-6. 报告 accepted、rejected、deferred 或 merged 的 IDs、updated paths、warnings 和 next actions。
+4. 用户已经给出 accept、reject、defer 或 merge 决定时，不要再次要求 approve；准备对应最终写入 payload 并调用 API，PreToolUse hook 会负责展示和审批。
+5. `accept`/`merge` 的 hook reject + note，或用户明确要求修改 accept/merge payload 时，调用 `kb.candidate.review.revise` 生成 revised payload，再重新调用最终写入 API 交给 hook 审批。
+6. `reject`/`defer` 的 hook reject + note 不调用 revise；把 note 作为新的 reason 或意图澄清，等待用户再次明确 reject/defer，或停止流程。
+7. 报告 accepted、rejected、deferred 或 merged 的 IDs、updated paths、warnings 和 next actions。
 
 ## Candidate 获取和下一个 Pending
 
@@ -104,7 +108,6 @@ flowchart TD
 - `references/kb.knowledge.accept.md`
 
 - 使用 `kb.knowledge.accept`。
-- 需要明确 `decision: "accept"`。
 - 需要 reviewed title、summary、content、evidence 和 bindto。
 - Evidence 必须来自 candidate 的 upstream source evidence。
 - Bindto 必须引用存在的 knowledgebase、outline 和 node。
@@ -117,7 +120,7 @@ flowchart TD
 - `references/kb.knowledge.reject.md`
 
 - 使用 `kb.knowledge.reject`。
-- 需要明确 `decision: "reject"`，建议提供 reason。
+- 需要明确 reject 用户决定，建议提供 reason。
 - 成功后 candidate 移动到 rejected；不生成 accepted knowledge。
 
 ## 延后 Candidate
@@ -127,7 +130,7 @@ flowchart TD
 - `references/kb.candidate.defer.md`
 
 - 使用 `kb.candidate.defer`。
-- 需要明确 `decision: "defer"`，建议提供 reason。
+- 需要明确 defer 用户决定，建议提供 reason。
 - 成功后 candidate 移动到 deferred；后续可由人工或未来 workflow 重新处理。
 
 ## 合并 Candidate 到 Knowledge
@@ -137,10 +140,10 @@ flowchart TD
 - `references/kb.knowledge.merge.md`
 
 - 使用 `kb.knowledge.merge`。
-- 需要 pending candidate ID、accepted target knowledge ID、明确 `decision: "merge"`。
+- 需要 pending candidate ID、accepted target knowledge ID 和明确 merge 用户决定。
 - 需要 reviewed summary、content、evidence 和 bindto。
-- 不使用单独的 merge LLM 草案；缺少 reviewed merge payload 时，必须暂停并要求用户提交 reviewed summary、content、evidence 和 bindto。
-- 成功后 target knowledge 更新，source candidate 以 rejected/merge decision 保留审计记录。
+- 不使用单独的 merge LLM 草案；缺少 merge payload 时，基于 candidate 和 target knowledge 准备 payload，最终审批交给 PreToolUse hook。
+- 成功后 target knowledge 更新，source candidate 以 rejected/merge review 记录保留审计。
 - Merge 结果使用 target knowledge ID，不使用 candidate ID 作为正式 knowledge ID。
 
 ## 审核辅助规则
@@ -150,7 +153,7 @@ flowchart TD
 - 不要代表用户做 accept、reject、defer、merge 或 deprecate 决策。
 - 不要把 LLM 或 ask 建议表述为用户批准。
 - 不要引入 candidate 或其引用对象中没有 evidence 支持的新事实。
-- Suggested `bindto` 只是建议；最终 `bindto` 必须来自用户 reviewed content。
+- Suggested `bindto` 只是建议；最终 `bindto` 必须进入最终写入 payload，并由 PreToolUse hook 审批。
 - 如果 candidate 包含 `outline_change_suggestions`，只说明影响；不要修改 knowledgebase outline，也不要把 outline 修改呈现为已批准。
 
 ## 废弃 Accepted Knowledge
@@ -163,16 +166,15 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  A["(user) accepted knowledge ID + reason"] --> B{"(ask) 是否已有明确 deprecate 确认"}
-  B -- 否 --> C["(ask) 展示影响并请求确认"]
-  C --> D["(user) 确认 deprecate"]
-  B -- 是 --> E["(api) kb.knowledge.deprecate"]
-  D --> E
+  A["(user) accepted knowledge ID + reason"] --> B{"(ask) 参数或意图是否不明确"}
+  B -- 是 --> C["(ask) 询问缺失信息"]
+  C --> E["(api) kb.knowledge.deprecate"]
+  B -- 否 --> E["(api) kb.knowledge.deprecate"]
   E --> F["(ask) 汇报 deprecated knowledge 和自动 index rebuild"]
 ```
 
 - 使用 `kb.knowledge.deprecate`。
-- 需要 accepted knowledge ID、明确 `decision: "deprecate"` 和 reason。
+- 需要 accepted knowledge ID 和 reason；用户意图已经明确时不要额外要求一次确认。
 - 不要删除 knowledge；deprecated knowledge 保留历史事实和引用链。
 - 展示 deprecated knowledge 时明确标记过时或不推荐。
 

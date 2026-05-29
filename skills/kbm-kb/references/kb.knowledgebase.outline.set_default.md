@@ -7,7 +7,7 @@
 ## Helper 调用
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.knowledgebase.outline.set_default '<payload-json>' --pretty
+python3 /home/sranger/codes/claude-code-marketplace/plugins/kbm/scripts/kbmanager_plugin.py kb.knowledgebase.outline.set_default '<payload-json>' --pretty
 ```
 
 ## 载荷
@@ -15,12 +15,11 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.knowledgebase.out
 ```json
 {
   "knowledgebase_id": "kb-...",
-  "outline_id": "workflow",
-  "review": {"decision": "approve"}
+  "outline_id": "workflow"
 }
 ```
 
-必填字段：`knowledgebase_id`、`outline_id`、`review`。
+必填字段：`knowledgebase_id`、`outline_id`。
 
 ## Result 字段
 
@@ -28,7 +27,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.knowledgebase.out
 
 ## 硬规则
 
-- 需要 review gate。
+- 最终写入会由 Claude Code PreToolUse hook 触发审批。
 - 目标 outline 必须存在且 active。
 - 不要直接编辑 outline files。
 - 不要修改 knowledge `bindto`。

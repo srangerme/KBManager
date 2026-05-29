@@ -7,7 +7,7 @@
 ## Helper 调用
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.source.deprecate '<payload-json>' --pretty
+python3 /home/sranger/codes/claude-code-marketplace/plugins/kbm/scripts/kbmanager_plugin.py kb.source.deprecate '<payload-json>' --pretty
 ```
 
 ## 载荷
@@ -15,12 +15,11 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.source.deprecate 
 ```json
 {
   "source_id": "source-...",
-  "reason": "<non-empty reason>",
-  "decision": "deprecate"
+  "reason": "<non-empty reason>"
 }
 ```
 
-必填字段：`source_id`、`reason`、`decision`。
+必填字段：`source_id`、`reason`。
 
 ## Result 字段
 
@@ -28,6 +27,6 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.source.deprecate 
 
 ## 硬规则
 
-- 需要 review gate；没有明确用户确认时不要调用。
+- 最终写入会由 Claude Code PreToolUse hook 触发审批；用户意图明确时不要额外要求一次确认。
 - 不要直接编辑 source metadata。
 - 不要物理删除 source。

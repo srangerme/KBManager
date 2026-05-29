@@ -7,7 +7,7 @@
 ## Helper 调用
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.knowledge.merge '<payload-json>' --pretty
+python3 /home/sranger/codes/claude-code-marketplace/plugins/kbm/scripts/kbmanager_plugin.py kb.knowledge.merge '<payload-json>' --pretty
 ```
 
 ## 载荷
@@ -16,7 +16,6 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.knowledge.merge '
 {
   "candidate_id": "<candidate-id>",
   "target_knowledge_id": "<knowledge-id>",
-  "decision": "merge",
   "summary": "<reviewed merged summary>",
   "content": "<reviewed merged content>",
   "evidence": [],
@@ -24,7 +23,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.knowledge.merge '
 }
 ```
 
-必填字段：`candidate_id`、`target_knowledge_id`、`decision`、reviewed `summary`、`content`、`evidence`、`bindto`。
+必填字段：`candidate_id`、`target_knowledge_id`、reviewed `summary`、`content`、`evidence`、`bindto`。
 
 ## Result 字段
 
@@ -32,6 +31,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.knowledge.merge '
 
 ## 硬规则
 
-- 需要 review gate；必须等待用户 approve 或 edited reviewed content。
+- 最终写入会由 Claude Code PreToolUse hook 触发审批并展示最终写入请求；不要在调用前额外要求一次 approve。
+- hook approve 时执行本 API；hook reject 无 note 时停止，不写对象。
+- hook reject + note 或其他修改 note 应先走 `kb.candidate.review.revise`，再用 revised payload 重新调用本 API。
 - Merge 结果使用 target knowledge ID，不使用 candidate ID 作为正式 knowledge ID。
 - Evidence 必须保持可追溯。

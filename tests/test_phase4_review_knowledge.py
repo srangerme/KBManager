@@ -61,7 +61,6 @@ def _setup_candidate(
     }
     kb_id = knowledgebase_create(
         tmp_path,
-        review={"decision": "approve"},
         title=kb_title,
         **kb_payload,
     ).to_dict()["knowledgebase_id"]
@@ -87,16 +86,12 @@ def _setup_candidate(
     return candidate_id, kb_id, candidate_payload
 
 
-def test_accept_requires_review_and_promotes_candidate(tmp_path: Path) -> None:
+def test_accept_promotes_candidate_after_hook_review(tmp_path: Path) -> None:
     candidate_id, kb_id, payload = _setup_candidate(tmp_path)
 
-    gate = knowledge_accept(
-        tmp_path, candidate_id=candidate_id
-    ).to_dict()
     result = knowledge_accept(
         tmp_path,
         candidate_id=candidate_id,
-        decision="accept",
         title="Accepted",
         summary=payload["summary"],
         content=payload["content"],
@@ -104,7 +99,6 @@ def test_accept_requires_review_and_promotes_candidate(tmp_path: Path) -> None:
         bindto=payload["bindto"],
     ).to_dict()
 
-    assert gate["status"] == "needs_review"
     assert result["status"] == "success"
     assert result["bindto"][0]["kb_id"] == kb_id
     assert not (tmp_path / "candidates/pending" / f"{candidate_id}.md").exists()
@@ -127,7 +121,6 @@ def test_accept_rejects_evidence_not_from_candidate(tmp_path: Path) -> None:
     result = knowledge_accept(
         tmp_path,
         candidate_id=candidate_id,
-        decision="accept",
         title="Accepted",
         summary=payload["summary"],
         content=payload["content"],
@@ -145,7 +138,6 @@ def test_accept_rejects_empty_evidence(tmp_path: Path) -> None:
     result = knowledge_accept(
         tmp_path,
         candidate_id=candidate_id,
-        decision="accept",
         title="Accepted",
         summary=payload["summary"],
         content=payload["content"],
@@ -162,7 +154,6 @@ def test_reject_and_defer_move_candidate(tmp_path: Path) -> None:
     rejected = knowledge_reject(
         tmp_path,
         candidate_id=candidate_id,
-        decision="reject",
         reason="No.",
     ).to_dict()
     assert rejected["status"] == "success"
@@ -173,7 +164,6 @@ def test_reject_and_defer_move_candidate(tmp_path: Path) -> None:
     deferred = candidate_defer(
         tmp_path,
         candidate_id=candidate_id,
-        decision="defer",
         reason="Later.",
     ).to_dict()
     assert deferred["status"] == "success"
@@ -186,7 +176,6 @@ def test_merge_updates_target_and_rejects_source_candidate(tmp_path: Path) -> No
     knowledge_accept(
         tmp_path,
         candidate_id=target_id,
-        decision="accept",
         title="Target",
         summary=payload["summary"],
         content=payload["content"],
@@ -199,7 +188,6 @@ def test_merge_updates_target_and_rejects_source_candidate(tmp_path: Path) -> No
         tmp_path,
         candidate_id=candidate_id,
         target_knowledge_id=target_id,
-        decision="merge",
         title="Merged",
         summary="Merged summary.",
         content="Merged content.",
@@ -221,7 +209,6 @@ def test_merge_rejects_evidence_that_does_not_reference_source(tmp_path: Path) -
     knowledge_accept(
         tmp_path,
         candidate_id=target_id,
-        decision="accept",
         title="Target",
         summary=payload["summary"],
         content=payload["content"],
@@ -234,7 +221,6 @@ def test_merge_rejects_evidence_that_does_not_reference_source(tmp_path: Path) -
         tmp_path,
         candidate_id=candidate_id,
         target_knowledge_id=target_id,
-        decision="merge",
         title="Merged",
         summary="Merged summary.",
         content="Merged content.",
@@ -251,7 +237,6 @@ def test_deprecate_knowledge_records_metadata(tmp_path: Path) -> None:
     knowledge_accept(
         tmp_path,
         candidate_id=candidate_id,
-        decision="accept",
         title="Accepted",
         summary=payload["summary"],
         content=payload["content"],
@@ -262,7 +247,6 @@ def test_deprecate_knowledge_records_metadata(tmp_path: Path) -> None:
     result = knowledge_deprecate(
         tmp_path,
         knowledge_id=candidate_id,
-        decision="deprecate",
         reason="Old.",
     ).to_dict()
 

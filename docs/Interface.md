@@ -117,7 +117,7 @@ next_actions: []
 - `candidate-create.md`：生成 pending candidate 草案。
 - `note-title.md`：为 note 生成标题。
 - `clean-migration-plan.md`：根据工作区差异生成迁移计划。
-- `knowledgebase-create.md`：根据 source-like input 生成 knowledgebase 草案，由 `kb.knowledgebase.create` 的 `needs_llm` 返回。
+- `knowledgebase-create.md`：根据 source-like input 生成 knowledgebase 草案，由 `kb.knowledgebase.create.prepare` / `revise` 的 `needs_llm` 返回。
 
 组装顺序：
 
@@ -154,7 +154,7 @@ resume:
 
 ## 7. Review Gate Catalog
 
-这些 API 或流程有 review gate：
+这些最终写入 API 会由 Claude Code PreToolUse hook 在 helper 调用执行前触发 review gate：
 
 - `kb.source.deprecate`
 - `kb.candidate.defer`
@@ -167,7 +167,8 @@ resume:
 - `kb.knowledgebase.outline.set_default`
 - `kb.knowledgebase.outline.archive`
 - `kb.note.deprecate`
-- clean 迁移执行
+
+clean 迁移执行不是 `kb.*` helper API，不经过上述 PreToolUse helper hook；它是 Claude Code UI 特许执行流程，必须在执行前展示 approved plan 并获得用户明确确认。
 
 这些流程没有 review gate：
 
@@ -198,8 +199,8 @@ resume:
 - Source add：`kb.source.add` -> handle `needs_llm`；该 workflow 的语义是导入独立 source。
 - Candidate create：`kb.candidate.create` 使用已有 source IDs 创建 pending candidates。
 - Note add：收集 content；用户未提供标题时通过 `kb.note.add` 触发 title `needs_llm`；随后 resume 并写入 note。
-- Candidate review：`kb.candidate.get` 或 `kb.candidate.next_pending` -> skill 只读 review assist -> user decision -> review-gated API。
-- Knowledgebase create：`kb.knowledgebase.create` -> handle `needs_llm` -> resume -> user review -> approved `kb.knowledgebase.create`。
+- Candidate review：`kb.candidate.get` 或 `kb.candidate.next_pending` -> skill 只读 review assist -> user decision；如有 note 先走 revise API，最终写入 API 由 PreToolUse hook 审批。
+- Knowledgebase create：`kb.knowledgebase.create.prepare` -> handle `needs_llm` -> resume -> user review/revise -> approved `kb.knowledgebase.create`。
 - Outline create/set-default/archive：收集 ID 和 review -> matching outline API。
 - List/view：只读展示对象或索引。
 - Map：`kb.knowledgebase.map`。

@@ -90,21 +90,20 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  A["(user) note_id + reason"] --> B{"(ask) 是否已有明确确认"}
-  B -- 否 --> C["(ask) 请求 deprecate 确认"]
-  C --> D["(user) 确认 deprecate"]
-  B -- 是 --> E["(api) kb.note.deprecate"]
-  D --> E
+  A["(user) note_id + reason"] --> B{"(ask) 参数或意图是否不明确"}
+  B -- 是 --> C["(ask) 询问缺失信息"]
+  C --> E["(api) kb.note.deprecate"]
+  B -- 否 --> E["(api) kb.note.deprecate"]
   E --> F["(ask) 汇报 deprecated note 和自动 index rebuild"]
 ```
 
 1. 获取 note ID 和非空 reason。
 2. 在 Claude Code UI 中展示将废弃的 note 和影响。
-3. 收集明确 `deprecate` decision。
+3. 用户意图已经明确时不要额外要求一次确认；参数或意图不明确时只询问缺失信息。
 4. 调用 `kb.note.deprecate`。
 5. 报告 deprecated note ID、path、diffs、warnings 和 next actions。
 
-Note deprecate 需要 review gate。不要物理删除 note。
+Note deprecate 最终写入会由 Claude Code PreToolUse hook 触发审批。不要物理删除 note。
 
 ## 边界
 

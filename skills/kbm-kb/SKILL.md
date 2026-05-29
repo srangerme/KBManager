@@ -22,31 +22,33 @@ description: 创建、查看、映射或维护 KBManager knowledgebase 与 outli
 本流程引用：
 
 - `references/kb.knowledgebase.create.md`
+- `references/kb.knowledgebase.create.prepare.md`
+- `references/kb.knowledgebase.create.revise.md`
 
 ### 意图流程图
 
 ```mermaid
 flowchart TD
   A["(user) path 或 JSON"] --> B["(ask) 收集 input_path 和 title"]
-  B --> C["(api) kb.knowledgebase.create"]
+  B --> C["(api) kb.knowledgebase.create.prepare"]
   C --> D{"(api) status"}
   D -- needs_llm --> E["(LLM) 按 API llm_request 生成 description/tags/scope/default_outline_id/outlines draft"]
-  E --> F["(api) resume kb.knowledgebase.create"]
+  E --> F["(api) resume kb.knowledgebase.create.prepare"]
   F --> G{"(api) status"}
-  G -- needs_review --> H["(ask) 在 Claude Code UI 展示 draft"]
-  H --> I["(user) approve 或编辑 reviewed payload"]
-  I --> J["(api) kb.knowledgebase.create approve"]
+  G -- success --> J["(api) kb.knowledgebase.create"]
+  J -- hook reject + note --> R["(api) kb.knowledgebase.create.revise"]
+  R --> J
   J --> K["(ask) 汇报 KB ID、Markdown path、outlines YAML path 和自动 index rebuild"]
 ```
 
 1. 收集 title 和 source-like definition context。
-3. API 返回 `needs_llm` 时，按返回的 `llm_request` 生成 description、tags、scope、default outline 和 outlines draft，并用同一 resume token 恢复。
-4. API 返回 `needs_review` 时，在 Claude Code UI 中展示 draft，包含 scope includes/excludes、default outline、outline nodes 和风险提示。
-5. 收集明确批准或编辑后的 reviewed payload。
-6. 再次调用 `kb.knowledgebase.create`，携带 reviewed payload 和 `review.decision: approve`。
-7. 报告 knowledgebase ID、knowledgebase path、outlines file、created objects 和 next actions。
+2. 调用 `kb.knowledgebase.create.prepare`；返回 `needs_llm` 时按 `llm_request` 生成 draft，并用同一 resume token 恢复。
+3. prepare 成功后，用返回的 payload 调用最终 `kb.knowledgebase.create`；不要额外展示一个最终 approve 节点，PreToolUse hook 会负责展示和审批。
+4. hook approve 时执行最终创建；hook reject 无 note 时停止，不写对象。
+5. hook reject + note 时，用当前 payload 和 note 调用 `kb.knowledgebase.create.revise`，得到 revised payload 后再次调用最终 `kb.knowledgebase.create` 交给 hook 审批。
+6. 报告 knowledgebase ID、knowledgebase path、outlines file、created objects 和 next actions。
 
-Knowledgebase create 需要 review gate。
+最终 `kb.knowledgebase.create` 会由 Claude Code PreToolUse hook 触发审批并展示最终写入请求；hook note 只回流到 revise，不表示原 API 已执行。
 
 用户给出的 source、file 或 directory 只是临时定义上下文。此工作流不创建 source/candidate，不得调用 `kb.source.add`，不得调用 `kb.candidate.create`，不得写入 `data/raw` 或 `data/cleaned`，也不得把该 input 记录为 candidate/knowledge evidence。
 
@@ -111,16 +113,15 @@ flowchart TD
   C --> D
   D --> E["(ask) 按 KB skill 规则整理单个 outline draft"]
   E --> F["(ask) 展示 outline draft"]
-  F --> G["(user) approve 或编辑 reviewed outline"]
-  G --> H["(api) kb.knowledgebase.outline.create"]
-  H --> I["(ask) 汇报 outline ID 和自动 index rebuild"]
+  F --> G["(api) kb.knowledgebase.outline.create"]
+  G --> I["(ask) 汇报 outline ID 和自动 index rebuild"]
 ```
 
 - 用于给 active knowledgebase 增加新 outline。
 - 需要 knowledgebase ID 和 reviewed outline payload。
-- 在 Claude Code UI 中展示 outline title、description、nodes、scope fit 和 node ID 设计。
-- 获得明确 approve 后调用 `kb.knowledgebase.outline.create`。
-- 需要 review gate。
+- 展示 outline title、description、nodes、scope fit 和 node ID 设计。
+- 用户没有提出修改且意图仍是创建时，调用 `kb.knowledgebase.outline.create`；不要额外要求一次 approve，PreToolUse hook 会统一触发审批。
+- 最终写入会由 Claude Code PreToolUse hook 触发审批。
 
 ## 设置默认 Outline
 
@@ -136,16 +137,15 @@ flowchart TD
   B -- 是 --> C["(ask) 只读列出 KB 或 active outlines 并询问"]
   B -- 否 --> D["(ask) 展示当前 default 和新 default"]
   C --> D
-  D --> E["(user) 明确确认 approve"]
-  E --> F["(api) kb.knowledgebase.outline.set_default"]
-  F --> G["(ask) 汇报 updated default 和自动 index rebuild"]
+  D --> E["(api) kb.knowledgebase.outline.set_default"]
+  E --> G["(ask) 汇报 updated default 和自动 index rebuild"]
 ```
 
 - 用于设置 active outline 为 knowledgebase default outline。
-- 需要 knowledgebase ID、outline ID 和明确 approve。
+- 需要 knowledgebase ID 和 outline ID。
 - 调用前确认目标 outline 存在且 active。
-- 获得批准后调用 `kb.knowledgebase.outline.set_default`。
-- 需要 review gate。
+- 用户意图明确时调用 `kb.knowledgebase.outline.set_default`；不要额外要求一次 approve，PreToolUse hook 会统一触发审批。
+- 最终写入会由 Claude Code PreToolUse hook 触发审批。
 
 ## Outline 归档
 
@@ -164,20 +164,19 @@ flowchart TD
   D -- 是 --> E["(ask) 停止并要求先 set default"]
   D -- 否 --> F["(ask) 检查 accepted knowledge bindings"]
   F --> G{"(ask) 是否存在 bindings"}
-  G -- 是 --> H["(ask) 展示 affected knowledge IDs 并请求确认"]
-  G -- 否 --> I["(user) approve archive"]
+  G -- 是 --> H["(ask) 展示 affected knowledge IDs；仅风险不明确时询问"]
+  G -- 否 --> I["(api) kb.knowledgebase.outline.archive"]
   H --> I
-  I --> J["(api) kb.knowledgebase.outline.archive"]
-  J --> K["(ask) 汇报 archived outline 和自动 index rebuild"]
+  I --> K["(ask) 汇报 archived outline 和自动 index rebuild"]
 ```
 
 - 用于 archive non-default outline。
-- 需要 knowledgebase ID、outline ID 和明确 approve。
+- 需要 knowledgebase ID 和 outline ID。
 - 归档前检查 binding risk：是否有 accepted knowledge 的 `bindto` 指向该 outline。
 - 不能直接 archive default outline；必须先 set another default。
 - 如果存在 bindings，除非用户明确接受风险或指定 repair plan，否则不要继续。
-- 获得批准后调用 `kb.knowledgebase.outline.archive`。
-- 需要 review gate。
+- 用户意图明确且风险已说明后调用 `kb.knowledgebase.outline.archive`；不要额外要求一次 approve，PreToolUse hook 会统一触发审批。
+- 最终写入会由 Claude Code PreToolUse hook 触发审批。
 
 ## Outline YAML 直接编辑例外
 

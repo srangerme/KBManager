@@ -271,7 +271,6 @@ class InteractionInterface:
             "kb.source.deprecate",
             source_id=source_id,
             reason=reason,
-            decision="deprecate",
         )
         return self._from_api_result(result, calls, "Deprecated source.")
 
@@ -321,7 +320,6 @@ class InteractionInterface:
                 calls,
                 "kb.knowledge.reject",
                 candidate_id=candidate_id,
-                decision="reject",
                 reason=reason,
             )
         elif decision == "defer":
@@ -329,7 +327,6 @@ class InteractionInterface:
                 calls,
                 "kb.candidate.defer",
                 candidate_id=candidate_id,
-                decision="defer",
                 reason=reason,
             )
         elif decision == "accept":
@@ -362,7 +359,6 @@ class InteractionInterface:
                 calls,
                 "kb.knowledge.accept",
                 candidate_id=candidate_id,
-                decision="accept",
                 reason=reason,
                 title=reviewed.get("title"),
                 summary=reviewed.get("summary"),
@@ -422,7 +418,6 @@ class InteractionInterface:
                 "kb.knowledge.merge",
                 candidate_id=candidate_id,
                 target_knowledge_id=merge_targets[0],
-                decision="merge",
                 reason=reason,
                 title=reviewed.get("title"),
                 summary=reviewed.get("summary"),
@@ -464,7 +459,7 @@ class InteractionInterface:
         calls: list[ApiCallRecord] = []
         create_result = self._call(
             calls,
-            "kb.knowledgebase.create",
+            "kb.knowledgebase.create.prepare",
             title=title,
             input_path=input_path,
             knowledgebase_id=knowledgebase_id,
@@ -477,14 +472,14 @@ class InteractionInterface:
             )
             create_result = self._call(
                 calls,
-                "kb.knowledgebase.create",
+                "kb.knowledgebase.create.prepare",
                 title=title,
                 input_path=input_path,
                 knowledgebase_id=knowledgebase_id,
                 resume_token=create_result["resume"]["token"],
                 llm_result=llm_result,
             )
-        if create_result["status"] == ApiStatus.NEEDS_REVIEW.value:
+        if create_result["status"] == ApiStatus.SUCCESS.value:
             draft = create_result.get("reviewed_payload") or create_result.get(
                 "knowledgebase_draft", {}
             )
@@ -500,7 +495,6 @@ class InteractionInterface:
                     scope=reviewed.get("scope"),
                     default_outline_id=reviewed.get("default_outline_id"),
                     outlines=reviewed.get("outlines"),
-                    review={"decision": "approve"},
                 )
                 return self._from_api_result(
                     create_result,
@@ -661,7 +655,6 @@ class InteractionInterface:
             "kb.note.deprecate",
             note_id=note_id,
             reason=reason,
-            decision="deprecate",
         )
         return self._from_api_result(result, calls, "Deprecated note.")
 
@@ -1001,7 +994,10 @@ _APPLICATION_OPERATIONS = {
     "kb.knowledge.reject": application.knowledge_reject,
     "kb.knowledge.merge": application.knowledge_merge,
     "kb.knowledge.deprecate": application.knowledge_deprecate,
+    "kb.candidate.review.revise": application.candidate_review_revise,
     "kb.knowledgebase.create": application.knowledgebase_create,
+    "kb.knowledgebase.create.prepare": application.knowledgebase_create_prepare,
+    "kb.knowledgebase.create.revise": application.knowledgebase_create_revise,
     "kb.knowledgebase.outline.create": application.knowledgebase_outline_create,
     "kb.knowledgebase.outline.set_default": application.knowledgebase_outline_set_default,
     "kb.knowledgebase.outline.archive": application.knowledgebase_outline_archive,

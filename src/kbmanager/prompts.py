@@ -24,6 +24,7 @@ PROMPT_BY_PURPOSE = {
     "note_title": "note-title",
     "clean_migration_plan": "clean-migration-plan",
     "knowledgebase_create": "knowledgebase-create",
+    "candidate_review_revise": "candidate-review-revise",
 }
 
 OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
@@ -92,6 +93,17 @@ OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
                 "default_outline_id": "non-empty string",
                 "outlines": "list[{id, title, description, status, nodes}]",
             },
+        },
+    },
+    "candidate_review_payload": {
+        "type": "object",
+        "required": ["summary", "content", "evidence", "bindto"],
+        "properties": {
+            "title": "non-empty string when accepting a candidate",
+            "summary": "non-empty string",
+            "content": "non-empty string",
+            "evidence": "list[{source_id|object_id|id, locator, quote|excerpt|snippet}]",
+            "bindto": "list[{kb_id, outline_id, node_id, reason}] or []",
         },
     },
 }

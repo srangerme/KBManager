@@ -1,0 +1,19 @@
+{
+  "description": "KBManager review gate approvals",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/sranger/codes/claude-code-marketplace/plugins/kbm/hooks/kbm_review_gate.py",
+            "if": "Bash(python3 */scripts/kbmanager_plugin.py *)",
+            "args": [],
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

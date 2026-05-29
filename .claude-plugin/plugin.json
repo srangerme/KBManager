@@ -1,12 +1,13 @@
 {
   "name": "kbm",
   "displayName": "KBManager",
-  "version": "2.2.2",
+  "version": "2.2.8",
   "description": "File-based personal AI knowledge manager skills and API helper for Claude Code.",
   "author": {
     "name": "KBManager"
   },
   "license": "MIT",
   "keywords": ["knowledge-management", "markdown", "claude-code"],
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json"
 }

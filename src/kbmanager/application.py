@@ -17,7 +17,7 @@ from typing import Any
 
 import yaml
 
-from kbmanager.contracts import ApiResult, ApiStatus, ObjectChanges, ReviewRequest
+from kbmanager.contracts import ApiResult, ApiStatus, ObjectChanges
 from kbmanager.errors import KBManagerError, RepositoryError, WorkspacePathError
 from kbmanager.prompts import prompt_descriptor
 from kbmanager.repository import MarkdownDocument, ObjectRepository
@@ -35,6 +35,8 @@ KNOWLEDGE_REJECT_OPERATION = "kb.knowledge.reject"
 KNOWLEDGE_MERGE_OPERATION = "kb.knowledge.merge"
 KNOWLEDGE_DEPRECATE_OPERATION = "kb.knowledge.deprecate"
 KNOWLEDGEBASE_CREATE_OPERATION = "kb.knowledgebase.create"
+KNOWLEDGEBASE_CREATE_PREPARE_OPERATION = "kb.knowledgebase.create.prepare"
+KNOWLEDGEBASE_CREATE_REVISE_OPERATION = "kb.knowledgebase.create.revise"
 KNOWLEDGEBASE_OUTLINE_CREATE_OPERATION = "kb.knowledgebase.outline.create"
 KNOWLEDGEBASE_OUTLINE_SET_DEFAULT_OPERATION = "kb.knowledgebase.outline.set_default"
 KNOWLEDGEBASE_OUTLINE_ARCHIVE_OPERATION = "kb.knowledgebase.outline.archive"
@@ -44,6 +46,7 @@ NOTE_GET_OPERATION = "kb.note.get"
 NOTE_DEPRECATE_OPERATION = "kb.note.deprecate"
 INDEX_REBUILD_OPERATION = "kb.index.rebuild"
 CLEAN_INSPECT_OPERATION = "kb.clean.inspect"
+CANDIDATE_REVIEW_REVISE_OPERATION = "kb.candidate.review.revise"
 
 INIT_DIRECTORIES = (
     "data/raw/md",
@@ -355,13 +358,9 @@ def source_deprecate(
     root: str | Path = ".",
     *,
     source_id: str,
-    decision: str | None = None,
     reason: str | None = None,
 ) -> ApiResult:
-    """Mark a source as deprecated after user review."""
-
-    if not _has_review_decision(decision, "deprecate"):
-        return _needs_review(SOURCE_DEPRECATE_OPERATION, ["deprecate", "revise"])
+    """Mark a source as deprecated after Claude Code review approval."""
 
     try:
         if not isinstance(reason, str) or not reason.strip():
@@ -581,7 +580,6 @@ def knowledge_accept(
     root: str | Path = ".",
     *,
     candidate_id: str,
-    decision: str | None = None,
     reason: str | None = None,
     title: str | None = None,
     summary: str | None = None,
@@ -589,10 +587,7 @@ def knowledge_accept(
     evidence: list[dict[str, Any]] | None = None,
     bindto: list[dict[str, Any]] | None = None,
 ) -> ApiResult:
-    """Promote a pending candidate to accepted knowledge after user review."""
-
-    if not _has_review_decision(decision, "accept"):
-        return _needs_review(KNOWLEDGE_ACCEPT_OPERATION, ["accept", "reject", "defer", "merge"])
+    """Promote a pending candidate to accepted knowledge after Claude Code approval."""
 
     try:
         workspace = Workspace(root)
@@ -667,13 +662,10 @@ def knowledge_reject(
     root: str | Path = ".",
     *,
     candidate_id: str,
-    decision: str | None = None,
     reason: str | None = None,
 ) -> ApiResult:
-    """Reject a candidate after user review."""
+    """Reject a candidate after Claude Code approval."""
 
-    if not _has_review_decision(decision, "reject"):
-        return _needs_review(KNOWLEDGE_REJECT_OPERATION, ["reject", "revise"])
     return _move_reviewed_candidate(
         root,
         operation=KNOWLEDGE_REJECT_OPERATION,
@@ -688,13 +680,10 @@ def candidate_defer(
     root: str | Path = ".",
     *,
     candidate_id: str,
-    decision: str | None = None,
     reason: str | None = None,
 ) -> ApiResult:
-    """Defer a pending candidate after user review."""
+    """Defer a pending candidate after Claude Code approval."""
 
-    if not _has_review_decision(decision, "defer"):
-        return _needs_review(CANDIDATE_DEFER_OPERATION, ["defer", "accept", "reject"])
     return _move_reviewed_candidate(
         root,
         operation=CANDIDATE_DEFER_OPERATION,
@@ -705,12 +694,101 @@ def candidate_defer(
     )
 
 
+def candidate_review_revise(
+    root: str | Path = ".",
+    *,
+    candidate_id: str,
+    action: str,
+    current_payload: dict[str, Any],
+    review_note: str,
+    target_knowledge_id: str | None = None,
+    resume_token: str | None = None,
+    llm_result: dict[str, Any] | None = None,
+) -> ApiResult:
+    """Revise a candidate accept/merge payload with user notes without writing objects."""
+
+    try:
+        workspace = Workspace(root)
+        repository = ObjectRepository(workspace)
+        candidate_record = _pending_candidate_record(repository, workspace, candidate_id)
+        candidate_document = repository.read_markdown(workspace.relative(candidate_record.path))
+        if action not in {"accept", "merge"}:
+            raise RepositoryError("candidate review revise action must be accept or merge")
+        if action == "merge":
+            if not isinstance(target_knowledge_id, str) or not target_knowledge_id.strip():
+                raise RepositoryError("merge revise requires target_knowledge_id")
+            knowledge_record = _find_single_object(
+                repository,
+                target_knowledge_id,
+                expected_type="knowledge",
+            )
+            if knowledge_record.status != "accepted":
+                raise RepositoryError(f"target knowledge must be accepted: {target_knowledge_id}")
+        if not isinstance(review_note, str) or not review_note.strip():
+            raise RepositoryError("candidate review revise requires a non-empty review_note")
+        current = _validate_candidate_review_payload_for_action(
+            repository,
+            candidate_document,
+            action=action,
+            payload=current_payload,
+        )
+        token_payload = {
+            "candidate_id": candidate_id,
+            "action": action,
+            "target_knowledge_id": target_knowledge_id,
+            "candidate": {
+                "frontmatter": candidate_document.frontmatter,
+                "body": candidate_document.body,
+            },
+            "current_payload": current,
+            "review_note": review_note.strip(),
+        }
+        if resume_token is None:
+            return _needs_llm(
+                CANDIDATE_REVIEW_REVISE_OPERATION,
+                purpose="candidate_review_revise",
+                system_prompt="candidate-review-revise",
+                required_context=["candidate", "current_payload", "review_note"],
+                output_schema="candidate_review_payload",
+                constraints=[
+                    "revise_review_payload_only",
+                    "apply_human_review_note",
+                    "must_not_write_objects",
+                    "preserve_candidate_evidence_traceability",
+                ],
+                token_payload=token_payload,
+            )
+        if resume_token != _resume_token(CANDIDATE_REVIEW_REVISE_OPERATION, token_payload):
+            return _failed(
+                CANDIDATE_REVIEW_REVISE_OPERATION,
+                "invalid_resume_token",
+                "Resume token does not match this candidate.review.revise request.",
+                "Restart kb.candidate.review.revise and use the returned resume token.",
+            )
+        revised = _validate_candidate_review_payload_for_action(
+            repository,
+            candidate_document,
+            action=action,
+            payload=llm_result,
+        )
+        return ApiResult.success(
+            CANDIDATE_REVIEW_REVISE_OPERATION,
+            extra={"reviewed_payload": revised},
+        )
+    except (KBManagerError, OSError) as exc:
+        return _failed(
+            CANDIDATE_REVIEW_REVISE_OPERATION,
+            "candidate_review_revise_failed",
+            str(exc),
+            "Provide a pending candidate, current review payload, and user review note.",
+        )
+
+
 def knowledge_merge(
     root: str | Path = ".",
     *,
     candidate_id: str,
     target_knowledge_id: str,
-    decision: str | None = None,
     reason: str | None = None,
     title: str | None = None,
     summary: str | None = None,
@@ -718,10 +796,7 @@ def knowledge_merge(
     evidence: list[dict[str, Any]] | None = None,
     bindto: list[dict[str, Any]] | None = None,
 ) -> ApiResult:
-    """Merge a reviewed candidate into an existing knowledge object."""
-
-    if not _has_review_decision(decision, "merge"):
-        return _needs_review(KNOWLEDGE_MERGE_OPERATION, ["merge", "reject", "revise"])
+    """Merge a reviewed candidate into an existing knowledge object after approval."""
 
     try:
         workspace = Workspace(root)
@@ -814,13 +889,9 @@ def knowledge_deprecate(
     root: str | Path = ".",
     *,
     knowledge_id: str,
-    decision: str | None = None,
     reason: str | None = None,
 ) -> ApiResult:
-    """Mark accepted knowledge as deprecated after user review."""
-
-    if not _has_review_decision(decision, "deprecate"):
-        return _needs_review(KNOWLEDGE_DEPRECATE_OPERATION, ["deprecate", "revise"])
+    """Mark accepted knowledge as deprecated after Claude Code approval."""
 
     try:
         workspace = Workspace(root)
@@ -865,22 +936,16 @@ def knowledge_deprecate(
     )
 
 
-def knowledgebase_create(
+def knowledgebase_create_prepare(
     root: str | Path = ".",
     *,
     title: str,
     input_path: str | Path | None = None,
-    description: str | None = None,
-    tags: list[str] | None = None,
-    scope: dict[str, Any] | None = None,
-    default_outline_id: str | None = None,
-    outlines: list[dict[str, Any]] | None = None,
-    review: dict[str, Any] | None = None,
     knowledgebase_id: str | None = None,
     resume_token: str | None = None,
     llm_result: dict[str, Any] | None = None,
 ) -> ApiResult:
-    """Create a knowledge base through LLM draft, review, and approved write gates."""
+    """Prepare a knowledgebase draft through LLM without writing objects."""
 
     try:
         workspace = Workspace(root)
@@ -891,28 +956,20 @@ def knowledgebase_create(
             knowledgebase_id=knowledgebase_id,
         )
 
-        has_reviewed_payload = _has_knowledgebase_create_payload(
-            description=description,
-            scope=scope,
-            default_outline_id=default_outline_id,
-            outlines=outlines,
+        if input_path is None:
+            raise RepositoryError("knowledgebase create prepare requires input_path")
+
+        input_context = _knowledgebase_create_input_context(workspace, input_path)
+        token_payload = _knowledgebase_create_token_payload(
+            title=title,
+            input_path=input_path,
+            knowledgebase_id=knowledgebase_id,
+            input_context=input_context,
         )
 
-        if resume_token is None and not has_reviewed_payload:
-            if input_path is None:
-                return _needs_review(
-                    KNOWLEDGEBASE_CREATE_OPERATION,
-                    ["approve", "revise", "reject"],
-                )
-            input_context = _knowledgebase_create_input_context(workspace, input_path)
-            token_payload = _knowledgebase_create_token_payload(
-                title=title,
-                input_path=input_path,
-                knowledgebase_id=knowledgebase_id,
-                input_context=input_context,
-            )
+        if resume_token is None:
             return _needs_llm(
-                KNOWLEDGEBASE_CREATE_OPERATION,
+                KNOWLEDGEBASE_CREATE_PREPARE_OPERATION,
                 purpose="knowledgebase_create",
                 system_prompt="knowledgebase-create",
                 required_context=["knowledgebase_create_input"],
@@ -927,51 +984,117 @@ def knowledgebase_create(
             )
 
         if resume_token is not None:
-            if input_path is None:
-                raise RepositoryError("knowledgebase create resume requires input_path")
-            input_context = _knowledgebase_create_input_context(workspace, input_path)
-            token_payload = _knowledgebase_create_token_payload(
-                title=title,
-                input_path=input_path,
-                knowledgebase_id=knowledgebase_id,
-                input_context=input_context,
-            )
-            if resume_token != _resume_token(KNOWLEDGEBASE_CREATE_OPERATION, token_payload):
+            if resume_token != _resume_token(KNOWLEDGEBASE_CREATE_PREPARE_OPERATION, token_payload):
                 return _failed(
-                    KNOWLEDGEBASE_CREATE_OPERATION,
+                    KNOWLEDGEBASE_CREATE_PREPARE_OPERATION,
                     "invalid_resume_token",
-                    "Resume token does not match this knowledgebase.create request.",
-                    "Restart kb.knowledgebase.create and use the returned resume token.",
+                    "Resume token does not match this knowledgebase.create.prepare request.",
+                    "Restart kb.knowledgebase.create.prepare and use the returned resume token.",
                 )
             payload = _validate_knowledgebase_create_payload(llm_result)
-            return _needs_review(
-                KNOWLEDGEBASE_CREATE_OPERATION,
-                ["approve", "revise", "reject"],
+            return ApiResult.success(
+                KNOWLEDGEBASE_CREATE_PREPARE_OPERATION,
                 extra={
                     "knowledgebase_draft": payload,
                     "knowledgebase_create_input": input_context,
                     "reviewed_payload": payload,
                 },
             )
+    except (KBManagerError, OSError) as exc:
+        return _failed(
+            KNOWLEDGEBASE_CREATE_PREPARE_OPERATION,
+            "knowledgebase_create_prepare_failed",
+            str(exc),
+            "Provide an input path and resume the LLM draft request.",
+        )
 
-        if not _review_approved(review):
-            reviewed_payload = None
-            if has_reviewed_payload:
-                reviewed_payload = _validate_knowledgebase_create_payload(
-                    {
-                        "description": description,
-                        "tags": tags or [],
-                        "scope": scope,
-                        "default_outline_id": default_outline_id,
-                        "outlines": outlines,
-                    }
-                )
-            return _needs_review(
-                KNOWLEDGEBASE_CREATE_OPERATION,
-                ["approve", "revise", "reject"],
-                extra=({"reviewed_payload": reviewed_payload} if reviewed_payload else None),
+
+def knowledgebase_create_revise(
+    root: str | Path = ".",
+    *,
+    title: str,
+    current_payload: dict[str, Any],
+    review_note: str,
+    knowledgebase_id: str | None = None,
+    resume_token: str | None = None,
+    llm_result: dict[str, Any] | None = None,
+) -> ApiResult:
+    """Revise a knowledgebase draft with user notes without writing objects."""
+
+    try:
+        workspace = Workspace(root)
+        repository = ObjectRepository(workspace)
+        _validate_knowledgebase_input(
+            repository,
+            title=title,
+            knowledgebase_id=knowledgebase_id,
+        )
+        current = _validate_knowledgebase_create_payload(current_payload)
+        if not isinstance(review_note, str) or not review_note.strip():
+            raise RepositoryError("knowledgebase create revise requires a non-empty review_note")
+        token_payload = {
+            "title": title,
+            "knowledgebase_id": knowledgebase_id,
+            "current_payload": current,
+            "review_note": review_note.strip(),
+        }
+        if resume_token is None:
+            return _needs_llm(
+                KNOWLEDGEBASE_CREATE_REVISE_OPERATION,
+                purpose="knowledgebase_create",
+                system_prompt="knowledgebase-create",
+                required_context=["current_payload", "review_note"],
+                output_schema="knowledgebase_create_draft",
+                constraints=[
+                    "revise_draft_only",
+                    "apply_human_review_note",
+                    "must_not_create_source_or_candidate",
+                    "preserve_meaningful_outline_hierarchy",
+                ],
+                token_payload=token_payload,
             )
+        if resume_token != _resume_token(KNOWLEDGEBASE_CREATE_REVISE_OPERATION, token_payload):
+            return _failed(
+                KNOWLEDGEBASE_CREATE_REVISE_OPERATION,
+                "invalid_resume_token",
+                "Resume token does not match this knowledgebase.create.revise request.",
+                "Restart kb.knowledgebase.create.revise and use the returned resume token.",
+            )
+        payload = _validate_knowledgebase_create_payload(llm_result)
+        return ApiResult.success(
+            KNOWLEDGEBASE_CREATE_REVISE_OPERATION,
+            extra={"reviewed_payload": payload, "knowledgebase_draft": payload},
+        )
+    except (KBManagerError, OSError) as exc:
+        return _failed(
+            KNOWLEDGEBASE_CREATE_REVISE_OPERATION,
+            "knowledgebase_create_revise_failed",
+            str(exc),
+            "Provide a current draft and a user review note.",
+        )
 
+
+def knowledgebase_create(
+    root: str | Path = ".",
+    *,
+    title: str,
+    description: str | None = None,
+    tags: list[str] | None = None,
+    scope: dict[str, Any] | None = None,
+    default_outline_id: str | None = None,
+    outlines: list[dict[str, Any]] | None = None,
+    knowledgebase_id: str | None = None,
+) -> ApiResult:
+    """Create a knowledge base from a reviewed payload after Claude Code approval."""
+
+    try:
+        workspace = Workspace(root)
+        repository = ObjectRepository(workspace)
+        _validate_knowledgebase_input(
+            repository,
+            title=title,
+            knowledgebase_id=knowledgebase_id,
+        )
         payload = _validate_knowledgebase_create_payload(
             {
                 "description": description,
@@ -1008,7 +1131,7 @@ def knowledgebase_create(
             "default_outline_id": payload["default_outline_id"],
             "outlines_file": outlines_relative_path,
             "outlines": manifest,
-            "reviewed_at": str((review or {}).get("reviewed_at") or today),
+            "reviewed_at": today,
             "review_decision": "approve",
             "created": today,
             "updated": today,
@@ -1049,14 +1172,9 @@ def knowledgebase_outline_create(
     *,
     knowledgebase_id: str,
     outline: dict[str, Any],
-    review: dict[str, Any] | None = None,
 ) -> ApiResult:
     """Create a new outline for an active knowledge base."""
 
-    if not _review_approved(review):
-        return _needs_review(
-            KNOWLEDGEBASE_OUTLINE_CREATE_OPERATION, ["approve", "revise", "reject"]
-        )
     try:
         workspace = Workspace(root)
         repository = ObjectRepository(workspace)
@@ -1125,15 +1243,9 @@ def knowledgebase_outline_set_default(
     *,
     knowledgebase_id: str,
     outline_id: str,
-    review: dict[str, Any] | None = None,
 ) -> ApiResult:
     """Set the default outline for an active knowledge base."""
 
-    if not _review_approved(review):
-        return _needs_review(
-            KNOWLEDGEBASE_OUTLINE_SET_DEFAULT_OPERATION,
-            ["approve", "revise", "reject"],
-        )
     try:
         workspace = Workspace(root)
         repository = ObjectRepository(workspace)
@@ -1188,16 +1300,10 @@ def knowledgebase_outline_archive(
     *,
     knowledgebase_id: str,
     outline_id: str,
-    review: dict[str, Any] | None = None,
     allow_existing_bindings: bool = False,
 ) -> ApiResult:
     """Archive a non-default outline."""
 
-    if not _review_approved(review):
-        return _needs_review(
-            KNOWLEDGEBASE_OUTLINE_ARCHIVE_OPERATION,
-            ["approve", "revise", "reject"],
-        )
     try:
         workspace = Workspace(root)
         repository = ObjectRepository(workspace)
@@ -1414,12 +1520,8 @@ def note_deprecate(
     *,
     note_id: str,
     reason: str | None = None,
-    decision: str | None = None,
 ) -> ApiResult:
-    """Mark a note deprecated and move it to notes/deprecated."""
-
-    if not _has_review_decision(decision, "deprecate"):
-        return _needs_review(NOTE_DEPRECATE_OPERATION, ["deprecate", "revise"])
+    """Mark a note deprecated and move it to notes/deprecated after approval."""
 
     try:
         if not isinstance(reason, str) or not reason.strip():
@@ -2336,25 +2438,6 @@ def _escape_table_cell(value: str) -> str:
     return value.replace("|", "\\|").replace("\n", " ")
 
 
-def _needs_review(
-    operation: str,
-    options: list[str],
-    *,
-    extra: dict[str, Any] | None = None,
-) -> ApiResult:
-    return ApiResult(
-        status=ApiStatus.NEEDS_REVIEW,
-        operation=operation,
-        review=ReviewRequest(required=True, options=options),
-        next_actions=["Provide a user review decision before retrying this operation."],
-        extra=extra or {},
-    )
-
-
-def _has_review_decision(decision: str | None, expected: str) -> bool:
-    return decision == expected
-
-
 def _pending_candidate_record(
     repository: ObjectRepository,
     workspace: Workspace,
@@ -2442,6 +2525,54 @@ def _validate_required_merge_content(
             "merge requires reviewed summary, content, evidence, and bindto; "
             "pass bindto as [] or binding mappings"
         )
+
+
+def _validate_candidate_review_payload_for_action(
+    repository: ObjectRepository,
+    candidate_document: MarkdownDocument,
+    *,
+    action: str,
+    payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise RepositoryError("candidate review payload must be a mapping")
+    title = payload.get("title")
+    summary = payload.get("summary")
+    content = payload.get("content")
+    evidence = payload.get("evidence")
+    bindto = payload.get("bindto")
+    if action == "accept":
+        _validate_required_accept_content(
+            title=title,
+            summary=summary,
+            content=content,
+            evidence=evidence,
+            bindto=bindto,
+        )
+        _validate_reviewed_evidence_from_candidate(evidence or [], candidate_document.frontmatter)
+    elif action == "merge":
+        _validate_required_merge_content(
+            summary=summary,
+            content=content,
+            evidence=evidence,
+            bindto=bindto,
+        )
+        source_ids = _validate_evidence_references_sources(repository, evidence or [])
+        _validate_evidence(repository, evidence or [], source_ids)
+    else:
+        raise RepositoryError("candidate review action must be accept or merge")
+    _validate_bindto(repository, bindto or [])
+    result = {
+        "summary": summary,
+        "content": content,
+        "evidence": evidence or [],
+        "bindto": bindto or [],
+    }
+    if title is not None:
+        if not isinstance(title, str) or not title.strip():
+            raise RepositoryError("reviewed title must be non-empty when provided; expected string")
+        result["title"] = title.strip()
+    return result
 
 
 def _knowledge_body(reviewed_body: str | None, fallback_body: str) -> str:
@@ -2918,10 +3049,6 @@ def _knowledge_bound_to_outline(
             ):
                 bound.add(record.object_id)
     return bound
-
-
-def _review_approved(review: dict[str, Any] | None) -> bool:
-    return isinstance(review, dict) and review.get("decision") == "approve"
 
 
 def _source_ids_from_evidence(evidence: list[Any]) -> list[str]:

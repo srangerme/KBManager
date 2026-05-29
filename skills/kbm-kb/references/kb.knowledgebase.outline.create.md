@@ -7,7 +7,7 @@
 ## Helper 调用
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.knowledgebase.outline.create '<payload-json>' --pretty
+python3 /home/sranger/codes/claude-code-marketplace/plugins/kbm/scripts/kbmanager_plugin.py kb.knowledgebase.outline.create '<payload-json>' --pretty
 ```
 
 ## 载荷
@@ -21,12 +21,11 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.knowledgebase.out
     "description": "Process-oriented view.",
     "status": "active",
     "nodes": []
-  },
-  "review": {"decision": "approve"}
+  }
 }
 ```
 
-必填字段：`knowledgebase_id`、`outline`、`review`。
+必填字段：`knowledgebase_id`、`outline`。
 
 ## Result 字段
 
@@ -34,7 +33,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.knowledgebase.out
 
 ## 硬规则
 
-- 需要 review gate。
+- 最终写入会由 Claude Code PreToolUse hook 触发审批。
 - 不要直接编辑 knowledgebase 或 outline files 来创建 outline。
 - 不要从 outline context 创建 source objects。
 - 不要自动设置为 default outline。

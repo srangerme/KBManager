@@ -15,6 +15,18 @@ def test_claude_plugin_manifest_is_valid_json() -> None:
     assert manifest["name"] == "kbm"
     assert "commands" not in manifest
     assert manifest["skills"] == "./skills/"
+    assert manifest["hooks"] == "./hooks/hooks.json"
+
+
+def test_claude_plugin_hook_command_uses_installed_absolute_path() -> None:
+    hooks = json.loads((REPO_ROOT / "hooks/hooks.json").read_text())
+    hook = hooks["hooks"]["PreToolUse"][0]["hooks"][0]
+    command = hook["command"]
+
+    assert command == "/home/sranger/codes/claude-code-marketplace/plugins/kbm/hooks/kbm_review_gate.py"
+    assert hook["if"] == "Bash(python3 */scripts/kbmanager_plugin.py *)"
+    assert "CLAUDE_PLUGIN_ROOT" not in command
+    assert '"' not in command
 
 
 def test_claude_plugin_exposes_no_commands() -> None:
@@ -37,6 +49,18 @@ def test_claude_plugin_packages_kbm_skills() -> None:
         text = (REPO_ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
         assert f"name: {name}" in text
         assert "description:" in text
+
+
+def test_docs_and_skills_do_not_use_claude_plugin_root_in_helper_examples() -> None:
+    paths = [
+        *sorted((REPO_ROOT / "docs").glob("*.md")),
+        *sorted((REPO_ROOT / "skills").glob("kbm-*/SKILL.md")),
+        *sorted((REPO_ROOT / "skills").glob("kbm-*/references/*.md")),
+    ]
+
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        assert "CLAUDE_PLUGIN_ROOT" not in text, f"CLAUDE_PLUGIN_ROOT found in {path}"
 
 
 def test_kbm_download_paper_pdf_has_no_bundled_scripts_requirement() -> None:
@@ -95,6 +119,7 @@ def test_api_references_are_split_by_operation() -> None:
         "kbm-source": {"kb.source.add.md", "kb.source.deprecate.md"},
         "kbm-candidate": {
             "kb.candidate.create.md",
+            "kb.candidate.review.revise.md",
             "kb.candidate.defer.md",
             "kb.candidate.get.md",
             "kb.candidate.next_pending.md",
@@ -105,6 +130,8 @@ def test_api_references_are_split_by_operation() -> None:
         },
         "kbm-kb": {
             "kb.knowledgebase.create.md",
+            "kb.knowledgebase.create.prepare.md",
+            "kb.knowledgebase.create.revise.md",
             "kb.knowledgebase.map.md",
             "kb.knowledgebase.outline.archive.md",
             "kb.knowledgebase.outline.create.md",
@@ -150,7 +177,50 @@ def test_api_references_are_split_by_operation() -> None:
     ).read_text(encoding="utf-8")
 
     assert "当前实现只支持本地 `.md` 和 `.pdf` 文件" in source_reference
-    assert "必须等待用户 approve 或 edited reviewed content" in candidate_reference
+    assert "最终写入会由 Claude Code PreToolUse hook 触发审批" in candidate_reference
+
+
+def test_kbm_review_gate_hook_asks_for_gated_helper_call() -> None:
+    hook = REPO_ROOT / "hooks/kbm_review_gate.py"
+    command = (
+        "python3 /home/sranger/codes/claude-code-marketplace/plugins/kbm/scripts/kbmanager_plugin.py "
+        "kb.knowledge.accept "
+        "'{\"candidate_id\":\"knowledge-1\",\"title\":\"Accepted\"}' --pretty"
+    )
+    event = {"tool_name": "Bash", "tool_input": {"command": command}}
+
+    completed = subprocess.run(
+        [sys.executable, str(hook)],
+        input=json.dumps(event),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    output = json.loads(completed.stdout)
+    decision = output["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "ask"
+    assert "kb.knowledge.accept" in decision["permissionDecisionReason"]
+
+
+def test_kbm_review_gate_hook_allows_prepare_call() -> None:
+    hook = REPO_ROOT / "hooks/kbm_review_gate.py"
+    command = (
+        "python3 /home/sranger/codes/claude-code-marketplace/plugins/kbm/scripts/kbmanager_plugin.py "
+        "kb.knowledgebase.create.prepare "
+        "'{\"title\":\"KB\",\"input_path\":\"seed.md\"}' --pretty"
+    )
+    event = {"tool_name": "Bash", "tool_input": {"command": command}}
+
+    completed = subprocess.run(
+        [sys.executable, str(hook)],
+        input=json.dumps(event),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert completed.stdout == ""
 
 
 def test_skills_reference_api_files_from_workflows() -> None:
@@ -198,6 +268,8 @@ def test_register_marketplace_script_adds_current_plugin(tmp_path: Path) -> None
     assert not (plugin_root / "commands").exists()
     assert (plugin_root / "skills/kbm-source/references/kb.source.add.md").is_file()
     assert (plugin_root / "scripts/kbmanager_plugin.py").is_file()
+    assert (plugin_root / "hooks/hooks.json").is_file()
+    assert (plugin_root / "hooks/kbm_review_gate.py").is_file()
     assert (plugin_root / "src/kbmanager/application.py").is_file()
     assert (plugin_root / "system-prompts/source-ingest.md").is_file()
 
@@ -211,6 +283,7 @@ def test_register_marketplace_script_copies_only_plugin_package(tmp_path: Path) 
     plugin_root = tmp_path / "plugins/kbm"
     assert {path.name for path in plugin_root.iterdir()} == {
         "pyproject.toml",
+        "hooks",
         "scripts",
         "skills",
         "src",

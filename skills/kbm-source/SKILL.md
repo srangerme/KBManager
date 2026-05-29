@@ -71,21 +71,20 @@ Source add 没有 review gate。此工作流只创建 source，不创建 candida
 
 ```mermaid
 flowchart TD
-  A["(user) source_id + reason"] --> B{"(ask) 是否已有明确 deprecate 确认"}
-  B -- 否 --> C["(ask) 在 Claude Code UI 请求确认"]
-  C --> D["(user) 确认 deprecate"]
-  B -- 是 --> E["(api) kb.source.deprecate"]
-  D --> E
+  A["(user) source_id + reason"] --> B{"(ask) 参数或意图是否不明确"}
+  B -- 是 --> C["(ask) 询问缺失信息"]
+  C --> E["(api) kb.source.deprecate"]
+  B -- 否 --> E["(api) kb.source.deprecate"]
   E --> F["(ask) 汇报 deprecated source、影响列表和自动 index rebuild 结果"]
 ```
 
 1. 获取 source ID 和非空 reason。
 2. 在 Claude Code UI 中展示 deprecation impact，包括引用它的 candidate/knowledge。
-3. 收集明确 deprecate decision。
+3. 用户意图已经明确时不要额外要求一次确认；参数或意图不明确时只询问缺失信息。
 4. 调用 `kb.source.deprecate`。
 5. 报告 deprecated source ID、impact list、warnings 和 rebuilt index result。
 
-Source deprecate 需要 review gate。不要物理删除 source；deprecated source 保留历史引用链。
+Source deprecate 最终写入会由 Claude Code PreToolUse hook 触发审批。不要物理删除 source；deprecated source 保留历史引用链。
 
 ## 边界
 

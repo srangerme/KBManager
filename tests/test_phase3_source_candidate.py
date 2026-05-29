@@ -60,7 +60,6 @@ def _create_active_kb(tmp_path: Path) -> str:
     result = knowledgebase_create(
         tmp_path,
         title="Research KB",
-        review={"decision": "approve"},
         **payload,
     ).to_dict()
     assert result["status"] == "success"
@@ -231,7 +230,6 @@ def test_source_deprecate_reports_evidence_impacts(tmp_path: Path) -> None:
     result = source_deprecate(
         tmp_path,
         source_id=source_id,
-        decision="deprecate",
         reason="Superseded.",
     ).to_dict()
 

@@ -7,7 +7,7 @@
 ## Helper 调用
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.note.deprecate '<payload-json>' --pretty
+python3 /home/sranger/codes/claude-code-marketplace/plugins/kbm/scripts/kbmanager_plugin.py kb.note.deprecate '<payload-json>' --pretty
 ```
 
 ## 载荷
@@ -15,12 +15,11 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.note.deprecate '<
 ```json
 {
   "note_id": "note-...",
-  "reason": "<non-empty reason>",
-  "decision": "deprecate"
+  "reason": "<non-empty reason>"
 }
 ```
 
-必填字段：`note_id`、`reason`、`decision`。
+必填字段：`note_id`、`reason`。
 
 ## Result 字段
 
@@ -28,6 +27,6 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.note.deprecate '<
 
 ## 硬规则
 
-- 需要 review gate。
+- 最终写入会由 Claude Code PreToolUse hook 触发审批。
 - 不要直接编辑、移动或删除 note files。
 - 展示 deprecated notes 时应标记为过时。

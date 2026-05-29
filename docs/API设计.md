@@ -43,7 +43,7 @@ context:
 响应：
 
 ```yml
-status: success | failed | needs_llm | needs_review | partial
+status: success | failed | needs_llm | partial
 operation: kb.source.add
 objects:
   created: []
@@ -63,7 +63,7 @@ next_actions: []
 - API 必须返回结构化错误。
 - `request_id`、`actor`、`context.trace_id` 等 envelope 字段可由 Interface、脚本或未来 server 层用于审计和追踪；当前公开 API 不要求这些字段，也不把它们写入对象事实。
 - `needs_llm` 响应不得产生对象写入、状态变更或文件移动。
-- `needs_review` 响应不得产生任何对象写入、状态变更或文件移动。
+- 当前第二层 API 不用 `needs_review` 承载审批；需要用户 review 的最终写入由 Claude Code PreToolUse hook 在 helper 命令执行前拦截。
 - 对象引用统一使用 ID。pending/deferred/rejected candidate 使用全局 knowledge ID；candidate 被 accept 后，原 candidate 文件被原子提升/迁移为正式 knowledge 文件，同一 ID 不得同时存在 candidate 文件和 knowledge 文件。
 
 ## 3. LLM 辅助机制
@@ -80,10 +80,10 @@ Interface 调用 kb.* API
   -> Claude Code 调用 LLM
   -> Claude Code 用 resume_token 回传 llm_result
   -> API 校验 LLM 输出结构和业务规则
-  -> 无 review 要求时 API 写入对象
-  -> 有 review 要求时 API 返回 needs_review 草案
-  -> Claude Code 收集 user review 并用同一 resume_token 回传 reviewed_payload
-  -> API 校验 review 决策和 reviewed_payload 后写入对象
+  -> prepare/revise API 返回 reviewed_payload 草案且不写入
+  -> Claude Code 展示草案；用户 approve 时调用最终写入 API
+  -> Claude Code PreToolUse hook 在最终写入前请求用户审批
+  -> API 校验 reviewed_payload 后写入对象
 ```
 
 `needs_llm` 响应：
@@ -116,25 +116,21 @@ resume_token: resume-20260520-001
 llm_result: {}
 ```
 
-带 review 的 resume 请求：
+带 review note 的 revise 请求：
 
 ```yml
-operation: <same operation returned by needs_llm>
-resume_token: resume-20260520-001
-llm_result: {}
-review:
-  decision: approve | reject | revise
-  reviewed_at: 2026-05-20T14:30:05
-reviewed_payload: {}
+operation: kb.knowledgebase.create.revise
+current_payload: {}
+review_note: 用户修改意见
 ```
 
 规则：
 
 - `resume_token` 只表示继续同一次 API 流程，不表示用户已经批准写入。
-- 对需要 LLM 且最终需要 user review 的写入 API，API 在收到 `llm_result` 后应先校验结构，再返回 `needs_review` 和待确认草案；缺少明确 review 决策时不得写入。
-- 用户确认或修改后，Interface 必须用同一个 `resume_token` 回传 `review` 和 `reviewed_payload`。API 只使用 `reviewed_payload` 落盘，不直接把未经 review 的 `llm_result` 写入对象事实。
-- `review.decision: approve` 才允许继续写入；`reject` 取消本次写入并返回 failed 或 success/noop；`revise` 要求 Interface 继续收集修改后的 reviewed payload。
-- 只需要 LLM 但不需要 review 的 API，可以在校验 `llm_result` 后直接写入。只需要 review 但不需要 LLM 的 API，必须在初次请求或后续请求中携带 review 决策和必要 reviewed payload。
+- prepare/revise API 只返回草案，不写对象文件。
+- 用户确认后，Interface 调用最终写入 API；Claude Code 插件的 PreToolUse hook 负责在工具执行前触发审批。
+- 用户输入 note 时，Interface 调用对应 revise API，把 note 交给 LLM 生成 revised payload，再重新展示给用户。
+- 最终写入 API 不接收 `decision` 或 `review` 字段，只接收已经 review 的业务 payload。
 
 任何 LLM prompt 都由以下部分组成：
 
@@ -233,7 +229,7 @@ API 收到 `llm_result` 后必须校验：
 - 读取：source、引用它的 candidate 和 knowledge。
 - 写入：source `status: deprecated`、`deprecated_at`、`deprecated_reason` 和 `updated`；成功写入后 API 自动调用 `kb.index.rebuild` 重建派生索引。
 - LLM 辅助：不需要。
-- Review gate：需要 user 确认。
+- Review gate：由 Claude Code PreToolUse hook 在最终写入前触发审批。
 - 输出：deprecated source 和基于引用关系生成的影响列表。
 
 ## 6. Candidate API
@@ -291,7 +287,7 @@ candidates:
 - 读取：candidate。
 - 写入：candidate `status: deferred`、`review.reviewed_at`、`review.decision`、`review.reason` 和 `updated`。
 - LLM 辅助：不需要。
-- Review gate：必须携带 user 的 defer 决策。
+- Review gate：由 Claude Code PreToolUse hook 在最终写入前触发审批。
 - 输出：deferred candidate。
 
 ## 7. Knowledge API
@@ -301,7 +297,7 @@ candidates:
 - 读取：candidate、knowledge 模板、已有 knowledge base 的 `outline` 摘要。
 - 写入：将 pending candidate 文件原子提升/迁移为正式 knowledge Markdown，写入 `type: knowledge`、`status: accepted`、`summary`、`evidence`、review 字段和 `bindto`；同一 ID 不保留 candidate 文件。成功写入后 API 自动调用 `kb.index.rebuild`，由索引根据 knowledge `bindto` 派生 knowledge base 成员视图。
 - LLM 辅助：不需要。`bindto` 和 outline 修改建议在 `kb.candidate.create` 或 Interface review 辅助阶段生成，用户通过 Claude Code reviewed content 最终确认。
-- Review gate：必须携带 user 的 accept 决策；写入内容必须来自用户在 Claude Code 确认后的 reviewed Markdown 或等价结构化输入。
+- Review gate：由 Claude Code PreToolUse hook 在最终写入前触发审批；写入内容必须来自用户在 Claude Code 确认后的 reviewed Markdown 或等价结构化输入。
 - reviewed payload 校验：`title`、`summary` 和 `content` 必须是非空字符串；`evidence` 必须来自 candidate 且至少引用一个 source；`bindto` 必须显式提供，空值用 `[]`，每项必须包含已有 active knowledge base ID 和有效 outline 节点。
 - 输出：knowledge ID、写入 knowledge 的 `bindto` 列表。
 - 约束：本 API 不创建 knowledge base 对象，不修改 knowledge base `outline`，也不提供独立 add/remove 成员维护能力；knowledge base 成员关系只由 knowledge `bindto` 表达，并通过索引派生展示。
@@ -311,7 +307,7 @@ candidates:
 - 读取：pending candidate、目标 knowledge、来源和已有 knowledge base 的 `outline` 摘要。
 - 写入：更新目标 knowledge 的 `summary`、`evidence`、正文、review 字段和 `bindto`，来源 candidate 变为 rejected 状态；candidate ID 不生成同 ID knowledge 文件。成功写入后 API 自动调用 `kb.index.rebuild`，由索引根据 knowledge `bindto` 派生 knowledge base 成员视图。
 - LLM 辅助：不需要。合并方案和 `bindto` 建议由 Interface 层在 Claude Code review 前生成。
-- Review gate：必须携带 user 的 merge 决策；写入内容必须来自用户在 Claude Code 确认后的 reviewed Markdown 或等价结构化输入。
+- Review gate：由 Claude Code PreToolUse hook 在最终写入前触发审批；写入内容必须来自用户在 Claude Code 确认后的 reviewed Markdown 或等价结构化输入。
 - reviewed payload 校验：`summary` 和 `content` 必须是非空字符串；`evidence` 必须至少引用一个 source；`bindto` 必须显式提供，空列表用 `[]`。`bindto[].kb_id` 必须指向已有 active knowledge base，`outline_id` 必须指向 active outline，`node_id` 必须存在。`target_knowledge_id` 必须是已 accepted 的 knowledge。
 - 输出：合并后的目标 knowledge、被合入的 candidate ID 和写入 knowledge 的 `bindto` 列表。
 - ID 规则：merge 到已有 knowledge 时，最终对象使用目标 knowledge ID；candidate 记录保留原 ID、状态为 `rejected`。同一 ID 不得同时存在 candidate 文件和 knowledge 文件。
@@ -322,7 +318,7 @@ candidates:
 - 读取：candidate。
 - 写入：candidate `status: rejected`、`review.reviewed_at`、`review.decision`、`review.reason` 和 `updated`。
 - LLM 辅助：不需要。
-- Review gate：必须携带 user 的 reject 决策。
+- Review gate：由 Claude Code PreToolUse hook 在最终写入前触发审批。
 - 输出：rejected candidate。
 
 ### `kb.knowledge.deprecate`
@@ -330,40 +326,48 @@ candidates:
 - 读取：knowledge、knowledgebase 和 source。
 - 写入：knowledge `status: deprecated`、`deprecated_at`、`deprecated_reason` 和 `updated`；成功写入后 API 自动调用 `kb.index.rebuild` 重建派生索引。
 - LLM 辅助：不需要。
-- Review gate：必须有 user 确认。
+- Review gate：由 Claude Code PreToolUse hook 在最终写入前触发审批。
 - 输出：deprecated knowledge。
 
 ## 8. Knowledge Base API
 
 ### `kb.knowledgebase.create`
 
-- 读取：初始阶段读取临时 source-like context、knowledgebase 模板和已有 knowledgebase 摘要。
+- 读取：knowledgebase 模板和已有 knowledgebase 摘要。
 - 写入：active knowledgebase Markdown，以及同名 outlines YAML 文件。knowledgebase frontmatter 包含 `id`、`type: knowledge-base`、`title`、`status: active`、`description`、`tags`、`scope`、`default_outline_id`、`outlines_file`、`outlines` manifest、review 字段、`created` 和 `updated`；完整 outline 树写入 `outlines_file` 指向的 YAML 文件。成功写入后 API 自动调用 `kb.index.rebuild` 重建派生索引。
-- LLM 辅助：需要。缺少 reviewed payload 且提供 `input_path` 时，API 返回 `needs_llm`，使用 `knowledgebase-create.md` 生成 draft；resume 后 API 校验 draft 并返回 `needs_review`。
-- Review gate：需要。缺少 `review.decision: approve` 时返回 `needs_review`，不得写入。LLM draft 不是用户批准。
+- LLM 辅助：不需要；草案生成由 `kb.knowledgebase.create.prepare` 完成。
+- Review gate：由 Claude Code PreToolUse hook 在最终写入前触发审批。
 - 校验：`title` 和 `description` 必须是非空字符串；`tags` 必须是字符串列表；`scope` 必须明确包含和排除范围；显式 `knowledgebase_id` 必须形如 `kb-YYYYMMDD-001` 或 `kb-YYYYMMDD-001-title-slug` 且全局唯一；标题不能与已有 knowledge-base 重复；`default_outline_id` 必须指向一个 active outline；每个 outline 和可绑定 node 必须有稳定 ID。
 - 输出：knowledgebase ID、Markdown 路径、outlines YAML 路径和自动索引重建结果。
 - 约束：本 API 不创建 source 对象，不写入 `data/raw` 或 `data/cleaned`，不提供 knowledgebase add/remove 成员维护能力；knowledgebase 成员关系只由 knowledge `bindto` 表达。
+
+### `kb.knowledgebase.create.prepare` / `kb.knowledgebase.create.revise`
+
+- 读取：临时 source-like context、当前 draft 和用户 review note。
+- 写入：无。
+- LLM 辅助：需要；prepare 用 `knowledgebase-create.md` 生成 draft，revise 根据用户 note 返回 revised payload。
+- Review gate：不需要，因为不写对象文件。
+- 输出：`reviewed_payload` / `knowledgebase_draft`。
 
 ### `kb.knowledgebase.outline.create`
 
 - 读取：knowledgebase Markdown 和 `outlines_file`。
 - 写入：向 outlines YAML 追加新 outline，并更新 knowledgebase frontmatter 中的 `outlines` manifest 和 `updated`；成功写入后 API 自动调用 `kb.index.rebuild`。
-- Review gate：需要 `review.decision: approve`。
+- Review gate：由 Claude Code PreToolUse hook 在最终写入前触发审批。
 - 校验：knowledgebase 必须 active；outline ID 不得重复；outline 必须有非空 `id`、`title`、`description`、`status` 和节点列表；节点 ID 在该 outline 内必须唯一。
 
 ### `kb.knowledgebase.outline.set_default`
 
 - 读取：knowledgebase Markdown 和 `outlines_file`。
 - 写入：更新 knowledgebase frontmatter 和 outlines YAML 中的 `default_outline_id`；成功写入后 API 自动调用 `kb.index.rebuild`。
-- Review gate：需要 `review.decision: approve`。
+- Review gate：由 Claude Code PreToolUse hook 在最终写入前触发审批。
 - 校验：目标 outline 必须存在且为 active。
 
 ### `kb.knowledgebase.outline.archive`
 
 - 读取：knowledgebase Markdown、`outlines_file` 和现有 accepted knowledge 的 `bindto`。
 - 写入：将目标 outline 状态置为 `archived`，并更新 knowledgebase frontmatter 中的 `outlines` manifest；成功写入后 API 自动调用 `kb.index.rebuild`。
-- Review gate：需要 `review.decision: approve`。
+- Review gate：由 Claude Code PreToolUse hook 在最终写入前触发审批。
 - 校验：不得归档默认 outline；如果已有 knowledge 绑定到该 outline，除非用户明确允许 `allow_existing_bindings: true`，否则返回失败并列出影响。
 
 ### `kb.knowledgebase.map`
@@ -399,7 +403,7 @@ candidates:
 - 读取：note。
 - 写入：note `status: deprecated`、`deprecated_at`、`deprecated_reason` 和 `updated`；将 note 文件移动到 `notes/deprecated/`。
 - LLM 辅助：不需要。
-- Review gate：需要 user 确认。
+- Review gate：由 Claude Code PreToolUse hook 在最终写入前触发审批。
 - 输出：deprecated note。
 
 ## 10. Index API
@@ -430,14 +434,4 @@ candidates:
 - knowledgebase outline create/set-default/archive。
 - note deprecated。
 
-缺少 user review 时返回：
-
-```yml
-status: needs_review
-review:
-  required: true
-  options:
-    - approve
-    - reject
-    - revise
-```
+缺少 user review 时不再由 API 返回 `needs_review`；Claude Code PreToolUse hook 会在最终写入 helper 调用执行前请求审批。

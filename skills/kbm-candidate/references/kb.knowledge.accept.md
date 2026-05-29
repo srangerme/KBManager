@@ -7,7 +7,7 @@
 ## Helper 调用
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.knowledge.accept '<payload-json>' --pretty
+python3 /home/sranger/codes/claude-code-marketplace/plugins/kbm/scripts/kbmanager_plugin.py kb.knowledge.accept '<payload-json>' --pretty
 ```
 
 ## 载荷
@@ -15,7 +15,6 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.knowledge.accept 
 ```json
 {
   "candidate_id": "<candidate-id>",
-  "decision": "accept",
   "title": "<reviewed title>",
   "summary": "<reviewed summary>",
   "content": "<reviewed markdown content>",
@@ -24,7 +23,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.knowledge.accept 
 }
 ```
 
-必填字段：`candidate_id`、`decision`、reviewed `title`、`summary`、`content`、`evidence`、`bindto`。
+必填字段：`candidate_id`、reviewed `title`、`summary`、`content`、`evidence`、`bindto`。
 
 ## Result 字段
 
@@ -32,7 +31,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kbmanager_plugin.py" kb.knowledge.accept 
 
 ## 硬规则
 
-- 需要 review gate；必须等待用户 approve 或 edited reviewed content。
+- 最终写入会由 Claude Code PreToolUse hook 触发审批并展示最终写入请求；不要在调用前额外要求一次 approve。
+- hook approve 时执行本 API；hook reject 无 note 时停止，不写对象。
+- hook reject + note 或其他修改 note 应先走 `kb.candidate.review.revise`，再用 revised payload 重新调用本 API。
 - `evidence` 必须来自 candidate upstream source evidence。
 - 空 `bindto` 必须传 `[]`。
 - 成功后不保留同 ID pending candidate。
