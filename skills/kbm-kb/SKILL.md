@@ -9,6 +9,8 @@ description: 创建、查看、映射或维护 KBManager knowledgebase 与 outli
 
 执行具体 workflow 时，只读取该小节列出的 API reference。
 
+API 调用硬规则：调用任何 `kb.*` API 前，必须先把 payload 写成 JSON object 文件，再把该文件路径传给 `scripts/kbmanager_plugin.py`；不得在命令行直接传 JSON 字符串。
+
 此 skill 覆盖所有 KB 相关工作流：knowledgebase create/list/map，以及 outline create/set-default/archive 和用户明确要求时的 outline YAML 受控维护。
 
 普通用户 workflow 中，不得修改 plugin 提供的 `SKILL.md`、`references/`、
@@ -24,6 +26,8 @@ description: 创建、查看、映射或维护 KBManager knowledgebase 与 outli
 - `references/kb.knowledgebase.create.md`
 - `references/kb.knowledgebase.create.prepare.md`
 - `references/kb.knowledgebase.create.revise.md`
+
+硬规则：调用任何 API 前，必须先读取本流程引用中对应的 references/ 文件确认输入载荷字段名，不得使用 result 输出字段名反推 payload。
 
 ### 意图流程图
 
@@ -56,6 +60,8 @@ flowchart TD
 
 本流程引用：无。此流程只读读取 object files 或 derived indexes。
 
+硬规则：调用任何 API 前，必须先读取本流程引用中对应的 references/ 文件确认输入载荷字段名，不得使用 result 输出字段名反推 payload。
+
 ### 意图流程图
 
 ```mermaid
@@ -77,6 +83,8 @@ flowchart TD
 本流程引用：
 
 - `references/kb.knowledgebase.map.md`
+
+硬规则：调用任何 API 前，必须先读取本流程引用中对应的 references/ 文件确认输入载荷字段名，不得使用 result 输出字段名反推 payload。
 
 ### 意图流程图
 
@@ -102,6 +110,8 @@ flowchart TD
 本流程引用：
 
 - `references/kb.knowledgebase.outline.create.md`
+
+硬规则：调用任何 API 前，必须先读取本流程引用中对应的 references/ 文件确认输入载荷字段名，不得使用 result 输出字段名反推 payload。
 
 ### 意图流程图
 
@@ -129,6 +139,8 @@ flowchart TD
 
 - `references/kb.knowledgebase.outline.set_default.md`
 
+硬规则：调用任何 API 前，必须先读取本流程引用中对应的 references/ 文件确认输入载荷字段名，不得使用 result 输出字段名反推 payload。
+
 ### 意图流程图
 
 ```mermaid
@@ -152,6 +164,8 @@ flowchart TD
 本流程引用：
 
 - `references/kb.knowledgebase.outline.archive.md`
+
+硬规则：调用任何 API 前，必须先读取本流程引用中对应的 references/ 文件确认输入载荷字段名，不得使用 result 输出字段名反推 payload。
 
 ### 意图流程图
 

@@ -9,6 +9,8 @@ description: 添加或废弃 KBManager source，包括本地文件、目录、PD
 
 执行具体 workflow 时，只读取该小节列出的 API reference。
 
+API 调用硬规则：调用任何 `kb.*` API 前，必须先把 payload 写成 JSON object 文件，再把该文件路径传给 `scripts/kbmanager_plugin.py`；不得在命令行直接传 JSON 字符串。
+
 此 skill 覆盖 source 生命周期：source add、source ingest guidance review 和 source deprecate。
 
 普通用户 workflow 中，不得修改 plugin 提供的 `SKILL.md`、`references/`、
@@ -22,6 +24,8 @@ description: 添加或废弃 KBManager source，包括本地文件、目录、PD
 本流程引用：
 
 - `references/kb.source.add.md`
+
+硬规则：调用任何 API 前，必须先读取本流程引用中对应的 references/ 文件确认输入载荷字段名，不得使用 result 输出字段名反推 payload。
 
 ### 意图流程图
 
@@ -66,6 +70,8 @@ Source add 没有 review gate。此工作流只创建 source，不创建 candida
 本流程引用：
 
 - `references/kb.source.deprecate.md`
+
+硬规则：调用任何 API 前，必须先读取本流程引用中对应的 references/ 文件确认输入载荷字段名，不得使用 result 输出字段名反推 payload。
 
 ### 意图流程图
 

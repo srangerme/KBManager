@@ -180,12 +180,16 @@ def test_api_references_are_split_by_operation() -> None:
     assert "最终写入会由 Claude Code PreToolUse hook 触发审批" in candidate_reference
 
 
-def test_kbm_review_gate_hook_asks_for_gated_helper_call() -> None:
+def test_kbm_review_gate_hook_asks_for_gated_helper_call(tmp_path: Path) -> None:
     hook = REPO_ROOT / "hooks/kbm_review_gate.py"
+    payload_file = tmp_path / "accept-payload.json"
+    payload_file.write_text(
+        json.dumps({"candidate_id": "knowledge-1", "title": "Accepted"}),
+        encoding="utf-8",
+    )
     command = (
         "python3 /home/sranger/codes/claude-code-marketplace/plugins/kbm/scripts/kbmanager_plugin.py "
-        "kb.knowledge.accept "
-        "'{\"candidate_id\":\"knowledge-1\",\"title\":\"Accepted\"}' --pretty"
+        f"kb.knowledge.accept {payload_file} --pretty"
     )
     event = {"tool_name": "Bash", "tool_input": {"command": command}}
 
@@ -200,15 +204,112 @@ def test_kbm_review_gate_hook_asks_for_gated_helper_call() -> None:
     output = json.loads(completed.stdout)
     decision = output["hookSpecificOutput"]
     assert decision["permissionDecision"] == "ask"
-    assert "kb.knowledge.accept" in decision["permissionDecisionReason"]
+    reason = decision["permissionDecisionReason"]
+    assert "kb.knowledge.accept" in reason
+    assert (
+        'Payload:\n```json\n{\n  "candidate_id": "knowledge-1",\n'
+        '  "title": "Accepted"\n}\n```'
+    ) in reason
 
 
-def test_kbm_review_gate_hook_allows_prepare_call() -> None:
+def test_kbm_review_gate_hook_summarizes_knowledgebase_create(tmp_path: Path) -> None:
     hook = REPO_ROOT / "hooks/kbm_review_gate.py"
+    payload = {
+        "title": "Research KB",
+        "knowledgebase_id": "kb-20260529-001-research",
+        "description": "Research knowledge.",
+        "tags": ["research", "papers"],
+        "scope": {"includes": ["papers"], "excludes": ["notes"]},
+        "default_outline_id": "canonical",
+        "outlines": [
+            {
+                "id": "canonical",
+                "title": "Canonical",
+                "description": "Main outline.",
+                "status": "active",
+                "nodes": [
+                    {
+                        "id": "sec1",
+                        "title": "Foundations",
+                        "summary": "Do not show this.",
+                        "children": [
+                            {
+                                "id": "sec1-1",
+                                "title": "History",
+                            }
+                        ],
+                    },
+                    {"id": "sec2", "title": "Applications"},
+                ],
+            }
+        ],
+    }
+    payload_file = tmp_path / "knowledgebase-create-payload.json"
+    payload_file.write_text(json.dumps(payload), encoding="utf-8")
     command = (
         "python3 /home/sranger/codes/claude-code-marketplace/plugins/kbm/scripts/kbmanager_plugin.py "
-        "kb.knowledgebase.create.prepare "
-        "'{\"title\":\"KB\",\"input_path\":\"seed.md\"}' --pretty"
+        f"kb.knowledgebase.create {payload_file} --pretty"
+    )
+    event = {"tool_name": "Bash", "tool_input": {"command": command}}
+
+    completed = subprocess.run(
+        [sys.executable, str(hook)],
+        input=json.dumps(event),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    output = json.loads(completed.stdout)
+    reason = output["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "## Knowledgebase" in reason
+    assert "- Title: Research KB" in reason
+    assert "- Scope includes: papers" in reason
+    assert "## Outlines" in reason
+    assert "- Canonical (active)" in reason
+    assert "  - Foundations" in reason
+    assert "    - History" in reason
+    assert "  - Applications" in reason
+    assert "```json" not in reason
+    assert '"id":' not in reason
+    assert "sec1" not in reason
+    assert "Do not show this." not in reason
+
+
+def test_kbm_review_gate_hook_denies_gated_call_with_invalid_payload_file(tmp_path: Path) -> None:
+    hook = REPO_ROOT / "hooks/kbm_review_gate.py"
+    payload_file = tmp_path / "invalid-payload.json"
+    payload_file.write_text("[1, 2, 3]", encoding="utf-8")
+    command = (
+        "python3 /home/sranger/codes/claude-code-marketplace/plugins/kbm/scripts/kbmanager_plugin.py "
+        f"kb.knowledge.accept {payload_file} --pretty"
+    )
+    event = {"tool_name": "Bash", "tool_input": {"command": command}}
+
+    completed = subprocess.run(
+        [sys.executable, str(hook)],
+        input=json.dumps(event),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    output = json.loads(completed.stdout)
+    decision = output["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "deny"
+    assert "valid JSON payload file" in decision["permissionDecisionReason"]
+
+
+def test_kbm_review_gate_hook_allows_prepare_call(tmp_path: Path) -> None:
+    hook = REPO_ROOT / "hooks/kbm_review_gate.py"
+    payload_file = tmp_path / "prepare-payload.json"
+    payload_file.write_text(
+        json.dumps({"title": "KB", "input_path": "seed.md"}),
+        encoding="utf-8",
+    )
+    command = (
+        "python3 /home/sranger/codes/claude-code-marketplace/plugins/kbm/scripts/kbmanager_plugin.py "
+        f"kb.knowledgebase.create.prepare {payload_file} --pretty"
     )
     event = {"tool_name": "Bash", "tool_input": {"command": command}}
 
@@ -372,13 +473,15 @@ def test_plugin_helper_invokes_api_with_project_dir(tmp_path: Path) -> None:
     env = os.environ.copy()
     env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
     env["CLAUDE_PROJECT_DIR"] = str(tmp_path)
+    payload_file = tmp_path / "init-payload.json"
+    payload_file.write_text("{}", encoding="utf-8")
 
     completed = subprocess.run(
         [
             sys.executable,
             str(REPO_ROOT / "scripts/kbmanager_plugin.py"),
             "kb.init",
-            "{}",
+            str(payload_file),
         ],
         check=True,
         capture_output=True,
@@ -396,13 +499,18 @@ def test_plugin_helper_rejects_removed_api_contract_fields(tmp_path: Path) -> No
     env = os.environ.copy()
     env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
     env["CLAUDE_PROJECT_DIR"] = str(tmp_path)
+    payload_file = tmp_path / "removed-contract-fields.json"
+    payload_file.write_text(
+        '{"entry' + 'point": "claude_code", "dry' + '_run": true}',
+        encoding="utf-8",
+    )
 
     completed = subprocess.run(
         [
             sys.executable,
             str(REPO_ROOT / "scripts/kbmanager_plugin.py"),
             "kb.init",
-            '{"entry' + 'point": "claude_code", "dry' + '_run": true}',
+            str(payload_file),
         ],
         capture_output=True,
         text=True,
@@ -423,13 +531,15 @@ def test_plugin_helper_does_not_import_kbmanager_from_project_dir(tmp_path: Path
     env = os.environ.copy()
     env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
     env["CLAUDE_PROJECT_DIR"] = str(tmp_path)
+    payload_file = tmp_path / "init-payload.json"
+    payload_file.write_text("{}", encoding="utf-8")
 
     completed = subprocess.run(
         [
             sys.executable,
             str(REPO_ROOT / "scripts/kbmanager_plugin.py"),
             "kb.init",
-            "{}",
+            str(payload_file),
         ],
         check=True,
         capture_output=True,
@@ -445,13 +555,15 @@ def test_plugin_helper_rejects_unknown_operation(tmp_path: Path) -> None:
     env = os.environ.copy()
     env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
     env["CLAUDE_PROJECT_DIR"] = str(tmp_path)
+    payload_file = tmp_path / "unknown-operation-payload.json"
+    payload_file.write_text("{}", encoding="utf-8")
 
     completed = subprocess.run(
         [
             sys.executable,
             str(REPO_ROOT / "scripts/kbmanager_plugin.py"),
             "kb.unknown",
-            "{}",
+            str(payload_file),
         ],
         capture_output=True,
         text=True,
@@ -460,3 +572,47 @@ def test_plugin_helper_rejects_unknown_operation(tmp_path: Path) -> None:
 
     assert completed.returncode != 0
     assert "unsupported operation" in completed.stderr
+
+
+def test_plugin_helper_rejects_inline_json_payload(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+    env["CLAUDE_PROJECT_DIR"] = str(tmp_path)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts/kbmanager_plugin.py"),
+            "kb.init",
+            "{}",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert completed.returncode != 0
+    assert "payload file cannot be read" in completed.stderr
+
+
+def test_plugin_helper_rejects_non_object_payload_file(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+    env["CLAUDE_PROJECT_DIR"] = str(tmp_path)
+    payload_file = tmp_path / "array-payload.json"
+    payload_file.write_text("[]", encoding="utf-8")
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts/kbmanager_plugin.py"),
+            "kb.init",
+            str(payload_file),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert completed.returncode != 0
+    assert "payload file must contain a JSON object" in completed.stderr

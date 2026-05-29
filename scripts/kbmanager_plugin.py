@@ -59,20 +59,22 @@ def _operation_map() -> dict[str, Callable[..., Any]]:
     }
 
 
-def _load_payload(raw: str) -> dict[str, Any]:
+def _load_payload_file(path: Path) -> dict[str, Any]:
     try:
-        payload = json.loads(raw)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise SystemExit(f"payload file cannot be read: {path}: {exc}") from exc
     except json.JSONDecodeError as exc:
-        raise SystemExit(f"payload must be valid JSON: {exc}") from exc
+        raise SystemExit(f"payload file must contain valid JSON: {path}: {exc}") from exc
     if not isinstance(payload, dict):
-        raise SystemExit("payload must be a JSON object")
+        raise SystemExit(f"payload file must contain a JSON object: {path}")
     return payload
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run a KBManager API operation.")
     parser.add_argument("operation", help="Operation name, for example kb.init")
-    parser.add_argument("payload", nargs="?", default="{}", help="JSON object of API keyword args")
+    parser.add_argument("payload_file", help="Path to a JSON object file of API keyword args")
     parser.add_argument(
         "--root",
         default=os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd(),
@@ -86,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         valid = ", ".join(sorted(operations))
         raise SystemExit(f"unsupported operation: {args.operation}. Valid operations: {valid}")
 
-    payload = _load_payload(args.payload)
+    payload = _load_payload_file(Path(args.payload_file))
     root = payload.pop("root", args.root)
     result = operations[args.operation](root, **payload)
     print(

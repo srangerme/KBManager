@@ -1,7 +1,7 @@
 # Claude Code Plugin
 
 KBManager can be installed as a Claude Code plugin. The plugin provides
-`kbm-*` skills and an internal JSON helper for calling the KBManager Python API.
+`kbm-*` skills and an internal JSON payload file helper for calling the KBManager Python API.
 It does not expose Claude Code commands, does not use MCP, and does not provide
 a public CLI.
 
@@ -12,7 +12,7 @@ The repository root is the plugin root:
 - `.claude-plugin/plugin.json`: plugin manifest.
 - `skills/kbm-*`: domain skills plus API-specific `references/` files for
   payloads, result fields, rules, Deep Research, and controlled outline updates.
-- `scripts/kbmanager_plugin.py`: internal JSON bridge to the `kb.*` API.
+- `scripts/kbmanager_plugin.py`: internal JSON payload file bridge to the `kb.*` API.
 - `src/kbmanager/`: KBManager core.
 - `system-prompts/`: built-in LLM prompts used by API and workflow boundaries.
 
@@ -56,15 +56,18 @@ Claude Code workflows load the relevant `kbm-*` skills and invoke the helper
 when they need a `kb.*` operation:
 
 ```bash
-python3 /home/sranger/codes/claude-code-marketplace/plugins/kbm/scripts/kbmanager_plugin.py <operation> '<payload-json>' --pretty
+python3 /home/sranger/codes/claude-code-marketplace/plugins/kbm/scripts/kbmanager_plugin.py <operation> /path/to/payload.json --pretty
 ```
 
-The helper imports `src/kbmanager` from the installed plugin and calls the
-requested API operation with `${CLAUDE_PROJECT_DIR}` as the default root. If the
-API returns `needs_llm`, Claude Code generates the required `llm_result` from
-the returned prompt/schema and resumes the same operation. Final review-gated
-write operations are intercepted by the bundled PreToolUse hook, which asks the
-user for approval before the helper command executes.
+Claude Code must write the operation payload as a JSON object file first, then
+pass that file path to the helper. The helper imports `src/kbmanager` from the
+installed plugin and calls the requested API operation with
+`${CLAUDE_PROJECT_DIR}` as the default root. If the API returns `needs_llm`,
+Claude Code generates the required `llm_result` from the returned prompt/schema
+and resumes the same operation with another JSON payload file. Final
+review-gated write operations are intercepted by the bundled PreToolUse hook,
+which reads the payload file and asks the user for approval before the helper
+command executes.
 
 ## Permissions
 

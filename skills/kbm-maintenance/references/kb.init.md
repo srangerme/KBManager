@@ -7,7 +7,7 @@
 ## Helper 调用
 
 ```bash
-python3 /home/sranger/codes/claude-code-marketplace/plugins/kbm/scripts/kbmanager_plugin.py kb.init '{}' --pretty
+python3 /home/sranger/codes/claude-code-marketplace/plugins/kbm/scripts/kbmanager_plugin.py kb.init /path/to/empty-payload.json --pretty
 ```
 
 ## 载荷

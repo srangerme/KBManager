@@ -7,7 +7,7 @@
 ## Helper 调用
 
 ```bash
-python3 /home/sranger/codes/claude-code-marketplace/plugins/kbm/scripts/kbmanager_plugin.py kb.knowledgebase.outline.set_default '<payload-json>' --pretty
+python3 /home/sranger/codes/claude-code-marketplace/plugins/kbm/scripts/kbmanager_plugin.py kb.knowledgebase.outline.set_default /path/to/payload.json --pretty
 ```
 
 ## 载荷
